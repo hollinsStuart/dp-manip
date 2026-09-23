@@ -168,6 +168,33 @@ wsl:    data/pickcube/state/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,js
 - `scripts/validate_replay.py` 可复查原始与重放的一致性；`scripts/inspect_dataset.py` 默认检查 state 文件。
 - `scripts/check_temporal_windows.py` 用真实 `obs` 验证历史 `obs[t-1:t+1]`、未来 `action[t:t+8]` 的首/中/末窗口：10 条轨迹共 646 个有效窗口，7 步短轨迹没有有效窗口，没有跨 episode 窗口。该检查只验证索引，不预设 padding 规则。
 
+### 100 条批次（9.23 B 节下一轮·阶段 B，ubuntu）
+
+采集命令同上文 10 条批次，只改 `-n 100 --traj-name pickcube_batch100`；**单进程**，因为 `run_cpu.py` 多进程时各进程从固定起点取种子，配合 `--only-count-success` 跳过失败种子会越界到下一个进程的种子段，产生重复示范。
+
+| 项目 | 结果 |
+| --- | --- |
+| 采集 | 13:48:56 → 13:49:23（ubuntu 时间），**27 秒**（含启动；进度条 23 秒，约 4 条/秒）；100 条成功，试了 101 个种子，**种子 51 规划失败被跳过**（日志 2 行 `screw plan failed`） |
+| state 重放 | **32 秒**，100/100 保存，命令同上文 |
+| `validate_replay.py` | 100/100 成功，动作未变，数值完整，obs `(T+1, 42)` float32 |
+| `inspect_dataset.py` | NaN/Inf 为 0；episode 边界可由 H5 组与 JSON id 恢复 |
+| 种子 | 0–100 去掉 51，共 100 个，互不重复，全部 < 5000（不与验证 5000+ / 测试 10000+ 重叠） |
+| 长度 | 最短 49 / 中位 79 / 平均 77.2 / 最长 99，共 7720 步；40–49: 1，50–59: 3，60–69: 12，70–79: 40，80–89: 38，90–99: 6 |
+| 贴近回合上限 | 两条超过 95 步：traj_54（种子 55，96 步）、traj_80（种子 81，99 步）；评估回合上限是 100 步，比示范慢的策略可能来不及完成 |
+| 与 `batch10` 对比 | 前 10 条（种子 0–9）的动作与观测**逐值相同** → 10 ⊂ 25 ⊂ 50 ⊂ 100 是真正的嵌套子集，`data.num_demos=10` 与第一次运行用的数据完全一致 |
+| 嵌套子集规模 | 前 10 条 726 步；前 25 条 1852 步；前 50 条 3760 步；前 100 条 7720 步 |
+
+文件（`demos-batch/PickCube-v1/motionplanning/`；日志在 ubuntu `logs/pickcube_batch100_{collect,replay}.log`）：
+
+| 文件 | 大小 | SHA-256 |
+| --- | --- | --- |
+| `pickcube_batch100.h5` | 2,828,836 | `73ebcdec96490e6e609ca7757ab869ecd0c87963d12fd5aa64675087da0e9c3e` |
+| `pickcube_batch100.json` | 23,325 | `166e2e58e5429544ba658433a177d5a7abda83faeeed852f3ce24a33af9caf83` |
+| `pickcube_batch100.state.pd_joint_pos.physx_cpu.h5` | 4,154,779 | `cfa628ed8f23587d5f929b4285ffd7b4ac6b6f3bebd038b0e95b092e5b7c0240` |
+| `pickcube_batch100.state.pd_joint_pos.physx_cpu.json` | 23,257 | `8def8dc02f9d06f1cb3a4b35a3a3bfd60aecff68d01773cf0a02b949c0c42eb4` |
+
+偏差：检查脚本第一次因 f-string 内的转义引号语法错误没跑起来（临时脚本的问题），改写后通过；ubuntu 工作区保持干净，已有数据与 `.venv` 未动。
+
 ### 哈希
 
 四个文件在 ubuntu、wsl、Mac 三端 SHA-256 一致，完整清单见 [manifests/](./manifests/)（9.23 生成并在 Mac 校验通过）：
