@@ -10,3 +10,4 @@ demos-*/
 results/
 checkpoints/
 logs/
+.venv-uv-guard/
