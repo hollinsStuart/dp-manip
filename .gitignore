@@ -11,3 +11,4 @@ results/
 checkpoints/
 logs/
 .venv-uv-guard/
+.idea/
