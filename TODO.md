@@ -17,13 +17,13 @@
 - [x] 阶段 4：编写 `scripts/sync.sh`（`push` / `fetch` / `pull-results` / `data` / `manifest` / `status`）。
 - [x] 阶段 5：往返验证（Mac → 远端、wsl → Mac → ubuntu、远端有改动时拒绝 push）。
 
-## B. DP 接入准备（P1，尚未开始）
+## B. DP 接入准备（P1，9.23 进行中：阶段 1 已完成）
 
-- [ ] 在 `pd_joint_pos` 8 维与 `pd_ee_delta_pos` 4 维之间正式选定控制模式。官方 IL 示例采用后者，但目前只完成了比较分析；若选后者，先转换一小批并验证成功率，再规划大规模转换。
+- [ ] 在 `pd_joint_pos` 8 维与 `pd_ee_delta_pos` 4 维之间正式选定控制模式。（9.23：跑通链路先用现有 `pd_joint_pos` 数据，靠动作归一化处理范围；`pd_ee_delta_pos` 之后转换，可作为「动作表示」对比。）官方 IL 示例采用后者，但目前只完成了比较分析；若选后者，先转换一小批并验证成功率，再规划大规模转换。
 - [ ] 明确训练用的 42 维扁平 state 向量定义、动作表示和缩放方式；不要仅凭文件名推断各维语义。训练数据与评估环境必须使用同一控制模式。
-- [ ] 确定观测历史长度、动作 horizon、padding 与归一化规则，记录在 `configs/`；训练和评估共用同一份定义。
-- [ ] 编写 ManiSkill H5/JSON → 训练样本的 dataset adapter；以 H5 `traj_*` 组和 JSON ID 划分 episode，不依据可能提前变真的逐步 `terminated`/`truncated`。
-- [ ] 选定 DP 实现来源：原版 real-stanford/diffusion_policy，或 ManiSkill 自带的 `examples/baselines/diffusion_policy`；比较后记录选择理由，报告中注明出处。
+- [x] 确定观测历史长度、动作 horizon、padding 与归一化规则，记录在 `configs/`；训练和评估共用同一份定义（`configs/pickcube_state_jointpos.toml`，规则见 `dp_manip/README.md`）。
+- [x] 编写 ManiSkill H5/JSON → 训练样本的 dataset adapter（`dp_manip/data.py`）；以 H5 `traj_*` 组和 JSON ID 划分 episode，不依据可能提前变真的逐步 `terminated`/`truncated`。
+- [x] 选定 DP 实现来源：ManiSkill 官方基线 `examples/baselines/diffusion_policy`（@62ff3a5），与原版 DP 同一 UNet；出处与改动见 `dp_manip/README.md`。
 - [ ] 接入所需的 Diffusion Policy 模型与采样组件，补齐与训练控制模式一致的 ManiSkill 评估环境（wsl 尚未安装 ManiSkill）；只按确定的需求新增依赖，不照搬上游旧环境。
 - [ ] 在小样本上做加载、单批前向/反向和评估接口检查，然后用少量 PickCube 数据跑通 **「专家轨迹 → (observation, action) 数据集 → DP 训练 → 策略评估」** 完整链路。
 

@@ -32,7 +32,8 @@ dp-manip/
   README.md AGENT.md STATUS.md TODO.md PLAN.md
   docs/history.md                           # Day 1 原始记录（原 in.txt）
   pyproject.toml uv.lock .python-version    # wsl 训练环境；只有 wsl 可以据此 uv sync
-  scripts/                                  # 训练 / 校验脚本（在 wsl 运行）
+  dp_manip/                                 # Diffusion Policy 实现（改编自 ManiSkill 官方基线，见 dp_manip/README.md）
+  scripts/                                  # 训练 / 评估 / 校验脚本（在 wsl 运行）
   configs/                                  # 任务级 dataset / training / evaluation 配置
   run_cpu.py patches/ environment/ mplib-probe-overrides.txt   # ubuntu 专家环境
   manifests/                                # 数据 SHA-256 清单（入库）
