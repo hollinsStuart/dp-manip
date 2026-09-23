@@ -1,6 +1,6 @@
 # dp-manip 当前状态
 
-**最后更新：9.23（B 节阶段 3）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
+**最后更新：9.23 22:41（PickCube 100 条基线 + 数据量消融）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
 
 > 本文件由 Mac 原 `progress.md` 与 wsl 原 `STATUS.md` 合并而成（9.23）。
 
@@ -11,6 +11,7 @@
 - **ubuntu**：PickCube 的环境、专家生成、数据保存、回放链路全部通过；10/10 成功；已重放出 `obs_mode: state` 数据。
 - **wsl**：**M0 训练节点验证完成**。Python、CUDA、RTX 4090 小规模训练能力已验证；state 数据在 wsl 上通过了哈希、观测与动作对齐、时间窗口、episode 边界检查。
 - **wsl（9.23 B 节阶段 2–3）**：已装 ManiSkill 3.0.1 评估环境与 diffusers；PickCube 评估环境开环回放 10/10 成功，与 ubuntu 逐条一致。**「专家轨迹 → 数据集 → DP 训练 → 闭环评估」链路已在 PickCube 上跑通**：10 条示范训练 30k 步，训练种子 10/10，测试种子只有 2–3%（过拟合，不是 bug）。详见下文「DP 链路」。
+- **PickCube 基线（9.23 21:55–22:41）**：100 条示范，测试成功率（success_once，100 回合）best.pt 0.67、final.pt 0.77；数据量消融 10 / 25 / 50 / 100 条 → final 0.02 / 0.14 / 0.47 / 0.77。完整记录与耗时见 [docs/0923-2155.md](./docs/0923-2155.md)。**待定：报告口径**（50 回合验证选出的 best.pt 在 100 条时比 final.pt 低 10 个百分点，挑选不可靠）。
 - **Mac**：9.23 起成为唯一权威 git 仓库，代码、配置、文档都从 ubuntu 和 wsl 汇总到这里（见 [PLAN.md](./PLAN.md)）。
 
 尚未进行：足量数据的 PickCube 基线、六任务数据收集、RGB 重放与视频、控制模式转换。

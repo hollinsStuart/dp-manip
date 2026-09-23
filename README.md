@@ -24,8 +24,8 @@
 | 步骤 | 机器 | 代码 / 配置 | 待办 | 进度（9.23） |
 | --- | --- | --- | --- | --- |
 | **1. 专家轨迹** | ubuntu 生成（运动规划 + state 重放）；Mac 中转；wsl 使用 | `run_cpu.py`、`patches/`；重放用 `mani_skill.trajectory.replay_trajectory`；校验用 `scripts/validate_replay.py`、`inspect_dataset.py` | [TODO C](./TODO.md) | 六个任务已选定：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。**只有 PickCube 有数据**（10 条），正在扩到 100 条；其余 5 个任务未开始 |
-| **2. 训练 DP** | wsl | `dp_manip/`、`scripts/train_dp.py`、`configs/*.toml` | [TODO B](./TODO.md) | 训练代码完成，PickCube 链路已跑通（10 条示范，见 [docs/0923-2016.md](./docs/0923-2016.md)） |
-| **3. 评估 + 消融** | wsl | `scripts/eval_dp.py`（`--split test/val/train`）、`scripts/replay_check.py` | [TODO D](./TODO.md) | 评估完成：固定测试种子、逐种子结果。数据量消融（PickCube 10/25/50/100 条）准备中 |
+| **2. 训练 DP** | wsl | `dp_manip/`、`scripts/train_dp.py`、`configs/*.toml` | [TODO B](./TODO.md) | 训练代码完成；PickCube 基线：100 条示范测试成功率 0.67–0.77（见 [docs/0923-2155.md](./docs/0923-2155.md)） |
+| **3. 评估 + 消融** | wsl | `scripts/eval_dp.py`（`--split test/val/train`）、`scripts/replay_check.py` | [TODO D](./TODO.md) | 评估完成：固定测试种子、逐种子结果。数据量消融 PickCube 10/25/50/100 条已跑（各 1 个训练种子）：0.02 / 0.14 / 0.47 / 0.77 |
 
 当前的做法是先在 PickCube 上把 1→2→3 做深：确认链路可靠、摸清需要多少数据，再铺到另外 5 个任务。
 
@@ -243,5 +243,6 @@ cd ~/projects/dp-manip
 ## 九、当前状态与下一步
 
 - 流程进度见上文「一、项目流程」；详细状态见 [STATUS.md](./STATUS.md)，待办见 [TODO.md](./TODO.md)，每次运行的记录在 `docs/mmdd-hhmm.md`。
-- 当前一轮：PickCube 采集 100 条示范（ubuntu）→ 传到 wsl → 训练 10/25/50/100 条四组，得到第一个可信基线和数据量消融的前四个点。
+- 刚完成：PickCube 100 条示范基线（测试 0.67–0.77）与数据量消融 10/25/50/100 条，见 [docs/0923-2155.md](./docs/0923-2155.md)。
+- 待决定：报告口径（best.pt 还是 final.pt）。
 - 之后：其余 5 个任务的专家数据（TODO C）→ 六任务基线 → 选定并完成研究实验。
