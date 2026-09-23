@@ -101,7 +101,7 @@ Mac 上离线检查 6 项全过；Mac 的仿真环境是 `mani_skill_nightly 202
 
 偏差：无。wsl 非交互 SSH 的 PATH 里没有 `uv`（在 `~/.local/bin`）和 `nvidia-smi`（在 `/usr/lib/wsl/lib`），远端命令需写全路径或补 PATH。
 
-**阶段 3（wsl，代码 `9ae8ae4`）**：
+**阶段 3（wsl，代码 `9ae8ae4`）**：完整运行记录与耗时见 [docs/0923-2016.md](./docs/0923-2016.md)。
 
 | 实验 | 设置 | 结果 |
 | --- | --- | --- |
