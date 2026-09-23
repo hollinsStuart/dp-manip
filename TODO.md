@@ -29,7 +29,7 @@
 - [x] 下次推送后在 wsl 复跑 `eval_dp.py --split train` 验证新参数。（9.23：`best.pt` 训练种子 10/10，与临时诊断一致。）
 - [x] 训练脚本记录峰值显存，用来判断同一张卡上能否并行跑多个实验。（9.23：`summary.json`，reserved 约 680 MiB。）
 - [x] 采集足量 PickCube 示范（先 100 条，与官方基线同量级），得到第一个可信的 PickCube 基线。（9.23：100 条，测试 best 0.67 / final 0.77，见 `docs/0923-2155.md`。是否转换 `pd_ee_delta_pos` 仍未决定。）
-- [ ] **定报告口径**：主结果用 final.pt 还是 best.pt；若用 best.pt，验证回合加到 100 以上。六任务开跑前定下，写进 `configs/README.md`。
+- [x] **定报告口径**：主结果固定用 final.pt，不按验证挑选（9.23 决定，写在 `configs/README.md`）。
 - [ ] 录制并查看 PickCube「成功后又失去」的回合视频（100 条 final 有 19/100），确认是否因为示范在成功那一刻就结束。
 - [ ] 实测同一张卡并行两组实验时的 ms/步 与评估耗时（显存峰值约 680 MiB，限制在 CPU）。
 

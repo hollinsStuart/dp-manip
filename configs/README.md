@@ -10,6 +10,8 @@
 | `[train]` | 随机种子、迭代数、batch、学习率、日志 / 验证 / 保存频率 |
 | `[eval]` | 验证种子段（训练中选 `best.pt`）与测试种子段（只用于报告），两段互不重叠，也不能与示范种子重叠 |
 
+**报告口径（9.23 决定）**：主结果一律用 `final.pt`（训练结束时的 EMA 权重）在测试种子上的 `success_once`，同时列出 `success_at_end`；**不用验证结果挑选检查点**。`best.pt` 仍会保存，只作参考。原因：50 回合验证的标准误约 ±6–7 个百分点，PickCube 100 条时按验证挑出的 `best.pt` 在测试集上比 `final.pt` 低 10 个百分点（见 `docs/0923-2155.md`）。验证曲线仍然记录，用来看训练是否收敛。
+
 命令行可用 `--set section.key=value` 临时覆盖，例如 `--set data.num_demos=5 --set train.total_iters=300`。
 
 当前配置：
