@@ -195,6 +195,8 @@ wsl:    data/pickcube/state/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,js
 
 偏差：检查脚本第一次因 f-string 内的转义引号语法错误没跑起来（临时脚本的问题），改写后通过；ubuntu 工作区保持干净，已有数据与 `.venv` 未动。
 
+**阶段 C（数据中转）**：ubuntu `demos-batch/` → Mac（`rsync -a`，4 个新文件哈希与上表一致）→ 用 `cp -n` 复制进 Mac `data/pickcube/` 与 `data/pickcube/state/` → `sync.sh data` 同步到 wsl → `sync.sh manifest` 重新生成清单：`ubuntu-demos.sha256` 8 → 12 个文件，`wsl-data.sha256` 4 → 8 个文件，**只有新增、没有删除或改动**；Mac 副本对两份新清单校验通过。
+
 ### 哈希
 
 四个文件在 ubuntu、wsl、Mac 三端 SHA-256 一致，完整清单见 [manifests/](./manifests/)（9.23 生成并在 Mac 校验通过）：

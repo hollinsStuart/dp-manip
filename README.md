@@ -163,15 +163,17 @@ M3 Max / 36 GB。本地 `.venv`（Python 3.11，ManiSkill + Vulkan/MoltenVK）�
 
 ---
 
-## 七、数据资产（PickCube，10 条，全部成功）
+## 七、数据资产（PickCube：10 条批次 + 100 条批次，全部成功）
 
 | 名称                     | 内容                                        | 维度                                                        |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------- |
 | 原始专家轨迹             | `pickcube_batch10.h5` + `.json`             | `actions float32 (T, 8)`；`obs` 为空                        |
 | state 重放               | `pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,json}` | `obs float32 (T+1, 42)`；`actions float32 (T, 8)` |
+| 100 条批次（原始 + 重放） | `pickcube_batch100{,.state.pd_joint_pos.physx_cpu}.{h5,json}` | 同上 |
 
-- 动作长度：74、74、50、86、76、88、71、74、49、84（共 726 步）。
-- 控制模式 `pd_joint_pos`，仿真/渲染后端均为 CPU，seed 0–9。
+- 10 条批次：动作长度 74、74、50、86、76、88、71、74、49、84（共 726 步），seed 0–9。
+- 100 条批次（9.23）：seed 0–100 去掉规划失败的 51；长度 49–99，共 7720 步；**前 10 条与 10 条批次逐值相同**，取前 N 条即可得到嵌套子集。详见 [STATUS.md](./STATUS.md)。
+- 控制模式 `pd_joint_pos`，仿真/渲染后端均为 CPU。
 - H5 顶层为 `traj_0`…`traj_9`，每条一个组；JSON `episodes[].episode_id` 是边界映射。逐步 `terminated`/`truncated` 可能提前变真，切分只能用组 + JSON ID。
 - 三端 SHA-256 一致，清单见 `manifests/ubuntu-demos.sha256`、`manifests/wsl-data.sha256`；各文件哈希也列在 [STATUS.md](./STATUS.md)。
 
