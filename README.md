@@ -1,6 +1,6 @@
 # dp-manip
 
-基于 ManiSkill 的专家轨迹生成 + Diffusion Policy 训练项目。本仓库（Mac）是**唯一权威源**，代码、配置、文档都在这里编辑，再同步到 ubuntu 与 wsl；本文件是入口，负责说明设备分工、数据流和常用命令。
+基于 ManiSkill 的专家轨迹生成 + Diffusion Policy 训练项目。本仓库（Mac）是**唯一权威源**，代码、配置、文档都在这里编辑，再同步到 ubuntu 与 wsl；本文件是入口，负责说明项目流程与进度、设备分工、数据流和常用命令。
 
 - 当前状态：[STATUS.md](./STATUS.md)
 - 未完成事项：[TODO.md](./TODO.md)
@@ -11,7 +11,32 @@
 
 ---
 
-## 一、设备分工
+## 一、项目流程（组内三步 ↔ 仓库）
+
+### 组内流程原文
+
+1. 基于 ManiSkill 仿真环境，构造 6 个机器人操作任务（PickCube、PushCube 等），在仿真里生成专家轨迹数据集（观测-动作）。操作：下载 [ManiSkill](https://github.com/mani-skill/ManiSkill)，按 [quickstart](https://maniskill.readthedocs.io/en/latest/user_guide/getting_started/quickstart.html) 部署环境、仿真并生成轨迹。
+2. 用第 1 步生成的轨迹训练 Diffusion Policy 策略模型。操作：[real-stanford/diffusion_policy](https://github.com/real-stanford/diffusion_policy) 里的 `train.py`。
+3. 在仿真环境里评估任务成功率；额外选做消融实验，比如轨迹数据量 / 数据质量消融、训练超参 / 网络结构消融，验证各模块贡献。
+
+### 每一步在仓库里对应什么
+
+| 步骤 | 机器 | 代码 / 配置 | 待办 | 进度（9.23） |
+| --- | --- | --- | --- | --- |
+| **1. 专家轨迹** | ubuntu 生成（运动规划 + state 重放）；Mac 中转；wsl 使用 | `run_cpu.py`、`patches/`；重放用 `mani_skill.trajectory.replay_trajectory`；校验用 `scripts/validate_replay.py`、`inspect_dataset.py` | [TODO C](./TODO.md) | 六个任务已选定：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。**只有 PickCube 有数据**（10 条），正在扩到 100 条；其余 5 个任务未开始 |
+| **2. 训练 DP** | wsl | `dp_manip/`、`scripts/train_dp.py`、`configs/*.toml` | [TODO B](./TODO.md) | 训练代码完成，PickCube 链路已跑通（10 条示范，见 [docs/0923-2016.md](./docs/0923-2016.md)） |
+| **3. 评估 + 消融** | wsl | `scripts/eval_dp.py`（`--split test/val/train`）、`scripts/replay_check.py` | [TODO D](./TODO.md) | 评估完成：固定测试种子、逐种子结果。数据量消融（PickCube 10/25/50/100 条）准备中 |
+
+当前的做法是先在 PickCube 上把 1→2→3 做深：确认链路可靠、摸清需要多少数据，再铺到另外 5 个任务。
+
+### 和组内流程的两处不同
+
+1. **第 2 步没有直接用 Stanford 的 `train.py`。** 用的是 ManiSkill 官方的 DP 基线（`examples/baselines/diffusion_policy`），网络结构和 Stanford 版相同（1D 条件 UNet + DDPM），能直接读 ManiSkill 数据、直接在 ManiSkill 里评估。Stanford 版要先为每个任务写数据读取和评估模块才能接上 ManiSkill，而且固定 Python 3.9 / torch 1.12 的老环境。在此基础上的改动（动作归一化、验证 / 测试种子分离等）和出处见 [dp_manip/README.md](./dp_manip/README.md)，技术细节见 [STATUS.md](./STATUS.md)「DP 链路」。
+2. **第 3 步的消融不是选做。** 课程大纲把「进一步研究」列为必做，单独占 20 分；评估与分析另占 25 分，要求 held-out 种子、分任务成功率、评估回合数和失败分析。详见 [docs/requirements.md](./docs/requirements.md)。
+
+---
+
+## 二、设备分工
 
 | 设备               | SSH 访问        | 项目路径                                      | 硬件                                 | 角色                              | 关键限制                                                            |
 | ------------------ | --------------- | --------------------------------------------- | ------------------------------------ | --------------------------------- | ------------------------------------------------------------------- |
@@ -25,7 +50,7 @@
 
 ---
 
-## 二、仓库结构
+## 三、仓库结构
 
 ```text
 dp-manip/
@@ -45,7 +70,7 @@ dp-manip/
 
 ---
 
-## 三、同步方式
+## 四、同步方式
 
 所有 git 与 rsync 操作都由 **Mac 发起**，远端从不主动连接 Mac（细节见 [PLAN.md](./PLAN.md)）：
 
@@ -67,7 +92,7 @@ scripts/sync.sh pull-results   # wsl 训练产出 → Mac
 
 ---
 
-## 四、数据流
+## 五、数据流
 
 ```text
 ubuntu                                          wsl
@@ -87,7 +112,7 @@ Mac：权威仓库，发起所有同步；数据经 Mac 中转  ◀── rsync 
 
 ---
 
-## 五、各设备环境
+## 六、各设备环境
 
 ### ubuntu（专家数据源）
 
@@ -138,7 +163,7 @@ M3 Max / 36 GB。本地 `.venv`（Python 3.11，ManiSkill + Vulkan/MoltenVK）�
 
 ---
 
-## 六、数据资产（PickCube，10 条，全部成功）
+## 七、数据资产（PickCube，10 条，全部成功）
 
 | 名称                     | 内容                                        | 维度                                                        |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------- |
@@ -156,7 +181,7 @@ Mac：同时保存两种布局（`demos-*/` 与 `data/`），用作中转和备�
 
 ---
 
-## 七、常用命令
+## 八、常用命令
 
 ### ubuntu：生成专家轨迹
 
@@ -213,10 +238,8 @@ cd ~/projects/dp-manip
 
 ---
 
-## 八、当前状态与下一步
+## 九、当前状态与下一步
 
-- ubuntu：PickCube 环境、专家生成、state 重放、回放链路全部通过；10/10 成功。
-- wsl：M0 训练节点验证完成（CUDA、FP32/AMP 训练、数据校验全通过）；正式训练尚未开始。
-- Mac：9.23 建为权威 git 仓库，ubuntu / wsl 已挂接，`scripts/sync.sh` 可用。
-
-下一步（详见 [TODO.md](./TODO.md)）：完成多设备工作流 → 确定控制模式（`pd_joint_pos` 8 维 vs `pd_ee_delta_pos` 4 维）与观测/动作 schema → 写 dataset adapter 与评估环境 → 跑通「专家轨迹 → 数据集 → DP 训练 → 评估」→ 扩展到六个任务。
+- 流程进度见上文「一、项目流程」；详细状态见 [STATUS.md](./STATUS.md)，待办见 [TODO.md](./TODO.md)，每次运行的记录在 `docs/mmdd-hhmm.md`。
+- 当前一轮：PickCube 采集 100 条示范（ubuntu）→ 传到 wsl → 训练 10/25/50/100 条四组，得到第一个可信基线和数据量消融的前四个点。
+- 之后：其余 5 个任务的专家数据（TODO C）→ 六任务基线 → 选定并完成研究实验。
