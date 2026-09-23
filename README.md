@@ -52,7 +52,7 @@ dp-manip/
 - **数据**：rsync 传输，传完用 `manifests/*.sha256` 校验。
 - **训练产出**：从 wsl rsync `results/ checkpoints/ logs/` 回 Mac，不带 `--delete`。
 
-> 同步脚本 `scripts/sync.sh` 与远端挂接尚未完成（PLAN 阶段 3–4），在此之前远端还不是 git 仓库。
+> 远端已挂接（PLAN 阶段 3）；同步脚本 `scripts/sync.sh` 尚未完成（阶段 4），在此之前手动执行上述 git 命令。
 
 ---
 
@@ -205,6 +205,6 @@ cd ~/projects/dp-manip
 
 - ubuntu：PickCube 环境、专家生成、state 重放、回放链路全部通过；10/10 成功。
 - wsl：M0 训练节点验证完成（CUDA、FP32/AMP 训练、数据校验全通过）；正式训练尚未开始。
-- Mac：9.23 建为权威 git 仓库；远端挂接与同步脚本待完成（TODO A）。
+- Mac：9.23 建为权威 git 仓库，ubuntu / wsl 已挂接；同步脚本待完成（TODO A）。
 
 下一步（详见 [TODO.md](./TODO.md)）：完成多设备工作流 → 确定控制模式（`pd_joint_pos` 8 维 vs `pd_ee_delta_pos` 4 维）与观测/动作 schema → 写 dataset adapter 与评估环境 → 跑通「专家轨迹 → 数据集 → DP 训练 → 评估」→ 扩展到六个任务。
