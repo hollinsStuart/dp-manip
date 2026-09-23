@@ -8,7 +8,7 @@
 | -------------- | ------------ | ------------------------------------------- | ----------------------------------- | ---------------------------------- |
 | 本机 MacBook   | 直接执行     | `/Users/hollins/Documents/Coding/dp-manip`  | 权威仓库：编辑、文档、编排、数据中转、分析 | 装 mplib；跑专家生成或训练；`uv sync` |
 | ubuntu         | `ssh ubuntu` | `~/Coding/dp-manip`                         | 生成专家轨迹、state 重放            | 跑训练；改/升级 venv 或已有数据；改代码；`uv sync` |
-| wsl            | `ssh wsl`    | `~/projects/dp-manip`                       | DP 训练与评估、数据校验             | 当作数据生成机（没装 ManiSkill）   |
+| wsl            | `ssh wsl`    | `~/projects/dp-manip`                       | DP 训练与评估、数据校验             | 当作数据生成机（有 ManiSkill 但没有可用的 mplib 规划） |
 
 核心原则：**ubuntu 造数据，wsl 训模型，Mac 做编排和权威仓库。** 三台角色不要串。
 
@@ -18,7 +18,7 @@
 2. **不要在 Mac 上尝试安装 mplib。** `libclang==11.0.1` 没有 macOS ARM64 wheel，这是已知死路，别再排查。Mac 只做非 mplib 的工作。
 3. **ubuntu 的 `.venv` 和 `demos-*` 数据视为只读。** 生成新数据会新建文件；除明确要求外，不删不改不升级已通过验证的文件。
 4. **不删除备份。** `~/Coding/dp-manip-old-backup`、`~/Coding/dp-manip-clean-venv-backup` 保留到 TODO E 确认后才处理。
-5. **wsl 目前没有 ManiSkill。** 评估需要它时，先确认要引入哪些依赖再装，不要直接套用 Stanford DP 的旧环境（Python 3.9 / torch 1.12）。
+5. **wsl 的 ManiSkill 只用于评估。** 9.23 起装有 mani-skill 3.0.1 / sapien 3.0.3 / gymnasium 1.3.0，版本与 ubuntu 一致，不要单独升级；新增依赖先写进 `pyproject.toml` 再在 wsl `uv lock`，不要直接套用 Stanford DP 的旧环境（Python 3.9 / torch 1.12）。
 6. **大文件与产物不入库。** `.gitignore` 忽略 `.venv/`、`data/`、`demos-*/`、`checkpoints/`、`logs/`、`results/`。不要提交 `.h5` 或 checkpoint。数据用 rsync 传输，一致性靠入库的 `manifests/*.sha256`；新数据生成后先更新清单再提交。
 7. **按 `sync.sh` 流程提交，push 前需用户确认。** Mac 是唯一权威仓库；不改写已推送的历史，不 `--force`，不绕过 `updateInstead` 的拒绝。
 8. **跨设备命令要显式、可复现。** 优先用 `ssh <alias> '<cmd>'` 单条执行，避免在远端做交互式、破坏性操作。
@@ -51,6 +51,7 @@ SSH 别名定义在 `~/.ssh/config`。批量传输用 `rsync -a`（不带 `--del
 - venv：`~/projects/dp-manip/.venv`，Python 3.11.15，由 `uv 0.12.18` 管理；无 pip，用 `uv pip ... --python .venv/bin/python`。
 - 复现：`UV_PYTHON_INSTALL_DIR="$PWD/.python" UV_CACHE_DIR="$PWD/.uv-cache" uv venv --python 3.11.15 && uv sync --frozen`。
 - 不要重复跑已通过的 CUDA/训练 smoke test，除非环境变了或出错。
+- 非交互 SSH 的 PATH 不含 `uv`（`~/.local/bin`）和 `nvidia-smi`（`/usr/lib/wsl/lib`），远端命令要补 PATH 或写全路径。
 
 ### Mac
 
@@ -110,7 +111,9 @@ ssh wsl 'cd ~/projects/dp-manip && sha256sum -c -' < manifests/wsl-data.sha256
 ssh wsl 'cd ~/projects/dp-manip && \
   .venv/bin/python scripts/verify_cuda.py && \
   .venv/bin/python scripts/inspect_dataset.py && \
-  .venv/bin/python scripts/check_temporal_windows.py'
+  .venv/bin/python scripts/check_temporal_windows.py && \
+  .venv/bin/python scripts/check_dp_offline.py --config configs/pickcube_state_jointpos.toml --device cuda && \
+  .venv/bin/python scripts/replay_check.py --config configs/pickcube_state_jointpos.toml'
 ```
 
 ## 6. 代码放哪

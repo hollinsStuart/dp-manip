@@ -17,7 +17,7 @@
 | ------------------ | --------------- | --------------------------------------------- | ------------------------------------ | --------------------------------- | ------------------------------------------------------------------- |
 | MacBook（本机）    | 本地            | `/Users/hollins/Documents/Coding/dp-manip`    | M3 Max / 36 GB                       | 权威仓库、编辑、文档、编排、数据中转、分析 | 装不了 mplib（`libclang==11.0.1` 无 macOS ARM64 wheel），不生成数据 |
 | ubuntu             | `ssh ubuntu`    | `~/Coding/dp-manip`                           | i7-8700K / 16 GB / GTX 1080 Ti 11 GB | 专家轨迹生成 + state 重放         | GTX 1080 Ti（sm_61）与当前 PyTorch CUDA 构建不兼容，**不能训练**    |
-| wsl                | `ssh wsl`       | `~/projects/dp-manip`                         | WSL2 / RTX 4090 / 驱动 591.86        | DP 训练与评估                     | 尚未安装 ManiSkill（只有训练/校验环境）                             |
+| wsl                | `ssh wsl`       | `~/projects/dp-manip`                         | WSL2 / RTX 4090 / 驱动 591.86        | DP 训练与评估                     | 有 ManiSkill 3.0.1 评估环境，但没有 mplib 规划，不生成数据          |
 
 > SSH 别名定义在 `~/.ssh/config`：`ubuntu` = 10.0.0.200，`wsl` = 10.0.0.248。另有 `ubuntu-frp` 走公网 frp，一般只在局域网不可达时使用。
 
@@ -116,8 +116,9 @@ Mac：权威仓库，发起所有同步；数据经 Mac 中转  ◀── rsync 
 | Python      | 3.11.15，虚拟环境 `~/projects/dp-manip/.venv`，由 `uv 0.12.18` 管理 |
 | 核心依赖    | PyTorch `2.14.0+cu130`、NumPy `1.26.4`、h5py `3.16.0`             |
 | GPU 驱动    | 591.86（`nvidia-smi` 报 CUDA 13.1，PyTorch 运行时 CUDA 13.0）      |
-| 尚未安装    | ManiSkill、torchvision、Diffusers、Hydra 等（评估环境待补）        |
-| 校验脚本    | `scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py`           |
+| 评估与 DP   | mani-skill 3.0.1、sapien 3.0.3、gymnasium 1.3.0（与 ubuntu 一致），diffusers 0.40.0 |
+| 校验脚本    | `scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py`、`scripts/check_dp_offline.py`、`scripts/replay_check.py` |
+| DP 脚本     | `scripts/train_dp.py`（训练 + 验证）、`scripts/eval_dp.py`（测试种子评估） |
 | 数据脚本    | `scripts/inspect_dataset.py`、`scripts/validate_replay.py`、`scripts/check_temporal_windows.py` |
 
 复现环境（wsl 项目根）：

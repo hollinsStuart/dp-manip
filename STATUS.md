@@ -1,6 +1,6 @@
 # dp-manip 当前状态
 
-**最后更新：9.23** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
+**最后更新：9.23（B 节阶段 2）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
 
 > 本文件由 Mac 原 `progress.md` 与 wsl 原 `STATUS.md` 合并而成（9.23）。
 
@@ -10,9 +10,10 @@
 
 - **ubuntu**：PickCube 的环境、专家生成、数据保存、回放链路全部通过；10/10 成功；已重放出 `obs_mode: state` 数据。
 - **wsl**：**M0 训练节点验证完成**。Python、CUDA、RTX 4090 小规模训练能力已验证；state 数据在 wsl 上通过了哈希、观测与动作对齐、时间窗口、episode 边界检查。
+- **wsl（9.23 B 节阶段 2）**：已装 ManiSkill 3.0.1 评估环境与 diffusers；PickCube 评估环境开环回放 10/10 成功，与 ubuntu 逐条一致。DP 代码在 `dp_manip/`，见下文「DP 链路」。
 - **Mac**：9.23 起成为唯一权威 git 仓库，代码、配置、文档都从 ubuntu 和 wsl 汇总到这里（见 [PLAN.md](./PLAN.md)）。
 
-尚未进行：正式训练、六任务数据收集、RGB 重放、控制模式转换。
+尚未进行：DP 正式训练与闭环评估（B 节阶段 3）、六任务数据收集、RGB 重放与视频、控制模式转换。
 
 ---
 
@@ -69,12 +70,36 @@
 | ----------- | -------------------------------------------------------------------------------------------- |
 | 系统        | WSL2 Ubuntu 24.04.5 LTS；项目盘上次检查约有 951 GB 可用空间                                   |
 | 项目 Python | 3.11.15，虚拟环境 `~/projects/dp-manip/.venv`；系统 Python 为 3.12.3                           |
-| 环境管理    | uv 0.12.18；`uv.lock` 已生成；`uv pip check` 检查 31 个包，均兼容；虚拟环境未安装 pip 模块     |
+| 环境管理    | uv 0.12.18；`uv pip check` 检查 106 个包，均兼容（9.23 阶段 2 前为 31 个）；虚拟环境未安装 pip 模块 |
 | 核心依赖    | PyTorch 2.14.0+cu130、NumPy 1.26.4、h5py 3.16.0                                               |
-| 尚未安装    | ManiSkill、torchvision、PyYAML、OmegaConf、Diffusers、Hydra；当前检查脚本不需要它们            |
+| 评估与 DP   | mani-skill 3.0.1、sapien 3.0.3、gymnasium 1.3.0（与 ubuntu 一致）、diffusers 0.40.0；mplib 0.1.1 随 mani-skill 装入但不使用 |
+| 尚未安装    | torchvision（RGB 观测时再装）                                                                  |
 | GPU         | NVIDIA GeForce RTX 4090，计算能力 8.9；驱动 591.86；`nvidia-smi` 显示 CUDA 13.1，PyTorch 运行时 CUDA 13.0 |
 
 **已通过的 GPU 检查**：CUDA 可见性与 4×4 矩阵乘法（和为 120）；5 步 FP32 前向、反向与 AdamW 更新；5 步 fp16 AMP 更新。两种训练检查的损失和梯度均为有限值，参数确实改变，没有 CUDA 错误。FP32 与 AMP 峰值已分配显存分别为 16.44 MiB、16.40 MiB。这些是功能检查，不是性能测试。脚本：`scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py [--amp]`。受限的进程沙箱可能挡住 GPU 访问，即使普通 WSL shell 中可用。
+
+### DP 链路：B 节阶段 1–2（9.23）
+
+**阶段 1（Mac，提交 `c8a8048`）**：`dp_manip/` 改编自 ManiSkill 官方 DP 基线（`haosulab/ManiSkill@62ff3a5`，Apache-2.0），出处与每处改动见 [dp_manip/README.md](./dp_manip/README.md)。修掉了基线用于我们数据时的四个问题：
+
+1. DDPM 采样把动作裁剪到 [-1, 1]，但 `pd_joint_pos` 动作范围是 [-2.344, 2.808] → 按维 min-max 归一化，统计量存进 checkpoint；
+2. 基线的 epoch 采样器 `drop_last=True`，726 个窗口 < batch 1024 时一批都没有 → 改为有放回采样；
+3. 绝对控制模式的轨迹末尾 padding 未定义，会报错 → 重复最后一个动作；
+4. 评估不固定种子，且用评估结果选 best → 分出验证种子 5000–5049（选 `best.pt`）与测试种子 10000–10099（只用于报告），脚本会拒绝与示范种子 0–9 重叠的配置。
+
+Mac 上离线检查 6 项全过；Mac 的仿真环境是 `mani_skill_nightly 2026.8.2`（不是 3.0.1）、numpy 2.4.6，且 macOS 上 ManiSkill 的 `can_render()` 恒为真、`render_backend="none"` 也会建渲染器并因 Vulkan 失败，所以**Mac 不用于评估**。
+
+**阶段 2（远端，锁文件提交 `a0f3fe9`，由 wsl 提交后取回）**：
+
+| 步骤 | 结果 |
+| --- | --- |
+| ubuntu 开环回放（3.0.1，生成数据的同一环境，只读） | 初始观测 10/10 一致（最大差 6e-8），开环成功 10/10；后段观测最大偏差 1.2e-2，原因是 state 数据用 `--use-env-states` 逐步强制设状态，而这里是纯开环 |
+| wsl 备份 | `~/dp-manip-backups/phase2-20260923/`：`freeze-before.txt`（31 包）、`uv.lock.before`、`head.txt`；`pyproject.toml.before` 实为推送后的新版，旧版见 git `e05ac89` |
+| `uv lock` | 只有新增，没有旧包改版本或删除 |
+| `uv sync --frozen` | 原 31 个包全部不变，新增 75 个；`.venv` 5.3G → 6.3G；`freeze-after.txt` 同目录 |
+| 验收 | torch `2.14.0+cu130` 且 CUDA 可用；`verify_cuda.py` 通过；`check_dp_offline.py --device cuda` 6 项通过；`replay_check.py` 10/10，逐条数值与 ubuntu 完全相同 |
+
+偏差：无。wsl 非交互 SSH 的 PATH 里没有 `uv`（在 `~/.local/bin`）和 `nvidia-smi`（在 `/usr/lib/wsl/lib`），远端命令需写全路径或补 PATH。
 
 ---
 
