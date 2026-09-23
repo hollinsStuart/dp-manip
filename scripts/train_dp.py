@@ -6,6 +6,7 @@ EMA weights used for evaluation). Outputs:
   results/<exp>/config.json     resolved config + run metadata
   results/<exp>/metrics.jsonl   training loss / lr, one line per log step
   results/<exp>/val_<iter>.json per-seed validation results
+  results/<exp>/summary.json    timings (train vs validation), peak GPU memory, val curve
   checkpoints/<exp>/{best,final}.pt   best = highest validation success_once
 
 Only validation seeds are used here; report numbers with scripts/eval_dp.py on
@@ -133,12 +134,16 @@ def main() -> None:
                               video_dir=str(result_dir / "videos") if args.video else None)
 
     best = -1.0
+    best_iteration = None
+    val_curve: list[dict] = []
+    val_time = 0.0
     metrics_file = (result_dir / "metrics.jsonl").open("a")
 
     def run_eval(iteration: int) -> None:
-        nonlocal best
+        nonlocal best, best_iteration, val_time
         from dp_manip.evaluate import evaluate
 
+        tick = time.time()
         ema.copy_to(ema_policy.parameters())
         result = evaluate(ema_policy, envs, cfg.val_seeds(), device)
         result["iteration"] = iteration
@@ -147,12 +152,16 @@ def main() -> None:
         print(f"[val {iteration}] success_once={s.get('success_once', float('nan')):.3f} "
               f"success_at_end={s.get('success_at_end', float('nan')):.3f} "
               f"over {s['num_episodes']} episodes ({s['wall_time_s']:.0f}s)")
+        val_curve.append({"iteration": iteration, **{k: s[k] for k in ("success_once", "success_at_end") if k in s}})
         score = s.get("success_once", 0.0)
         if score > best:
-            best = score
+            best, best_iteration = score, iteration
             save_checkpoint(ckpt_dir / "best.pt", policy=policy, ema_policy=ema_policy,
                             config=cfg.to_dict(), iteration=iteration, extra={"val": s})
+        val_time += time.time() - tick
 
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     policy.train()
     start = time.time()
     for iteration in range(1, cfg.train.total_iters + 1):
@@ -186,7 +195,31 @@ def main() -> None:
     save_checkpoint(ckpt_dir / "final.pt", policy=policy, ema_policy=ema_policy,
                     config=cfg.to_dict(), iteration=cfg.train.total_iters)
     metrics_file.close()
-    print(f"done in {time.time() - start:.0f}s; outputs in {result_dir} and {ckpt_dir}")
+
+    total = time.time() - start
+    summary = {
+        "exp": args.exp,
+        "num_demos": len(demos.episodes),
+        "total_iters": cfg.train.total_iters,
+        "wall_time_s": total,
+        # Everything that is not validation: optimizer steps, logging, checkpoint saves.
+        "train_time_s": total - val_time,
+        "train_ms_per_iter": 1000 * (total - val_time) / cfg.train.total_iters,
+        "val_time_s": val_time,
+        "val_runs": len(val_curve),
+        "peak_gpu_mem_allocated_mb": torch.cuda.max_memory_allocated(device) / 2**20 if device.type == "cuda" else None,
+        "peak_gpu_mem_reserved_mb": torch.cuda.max_memory_reserved(device) / 2**20 if device.type == "cuda" else None,
+        "final_loss": loss.item(),
+        "best_val_success_once": best if best_iteration is not None else None,
+        "best_iteration": best_iteration,
+        "val_curve": val_curve,
+        "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    (result_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    mem = summary["peak_gpu_mem_reserved_mb"]
+    print(f"done in {total:.0f}s (train {summary['train_time_s']:.0f}s = {summary['train_ms_per_iter']:.1f} ms/iter, "
+          f"val {val_time:.0f}s){f', peak GPU reserved {mem:.0f} MiB' if mem else ''}; "
+          f"outputs in {result_dir} and {ckpt_dir}")
 
 
 if __name__ == "__main__":

@@ -15,3 +15,4 @@
 当前配置：
 
 - `pickcube_state_jointpos.toml`：PickCube，`pd_joint_pos`，10 条示范，用于跑通链路。
+- `pickcube_state_jointpos_100.toml`：PickCube，`pd_joint_pos`，100 条示范（ubuntu 单进程采集，种子从 0 起）；数据效率实验用 `--set data.num_demos=N` 取前 N 条。
