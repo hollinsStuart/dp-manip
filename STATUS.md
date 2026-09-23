@@ -1,0 +1,190 @@
+# dp-manip 当前状态
+
+**最后更新：9.23** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
+
+> 本文件由 Mac 原 `progress.md` 与 wsl 原 `STATUS.md` 合并而成（9.23）。
+
+---
+
+## 一、结论
+
+- **ubuntu**：PickCube 的环境、专家生成、数据保存、回放链路全部通过；10/10 成功；已重放出 `obs_mode: state` 数据。
+- **wsl**：**M0 训练节点验证完成**。Python、CUDA、RTX 4090 小规模训练能力已验证；state 数据在 wsl 上通过了哈希、观测与动作对齐、时间窗口、episode 边界检查。
+- **Mac**：9.23 起成为唯一权威 git 仓库，代码、配置、文档都从 ubuntu 和 wsl 汇总到这里（见 [PLAN.md](./PLAN.md)）。
+
+尚未进行：正式训练、六任务数据收集、RGB 重放、控制模式转换。
+
+---
+
+## 二、ubuntu：专家数据环境（9.22 重建并验证通过）
+
+| 项目              | 当前状态                                                            |
+| ----------------- | ------------------------------------------------------------------- |
+| 系统              | Ubuntu Server 26.04                                                 |
+| 硬件              | Intel Core i7-8700K、16 GB RAM、GTX 1080 Ti 11 GB                   |
+| NVIDIA 驱动       | 580.178.04                                                          |
+| 正式项目          | `~/Coding/dp-manip`                                                 |
+| Python 环境       | `~/Coding/dp-manip/.venv`，Python 3.11.15                           |
+| ManiSkill / MPlib | `mani-skill==3.0.1` / `mplib==0.2.1`                                |
+| 依赖记录          | `environment/ubuntu-expert-freeze.txt`                              |
+| MPlib 版本覆盖    | `mplib-probe-overrides.txt`                                         |
+| 适配补丁          | `patches/mani_skill_mplib_0_2_1.patch`                              |
+| CPU 专家入口      | `run_cpu.py`                                                        |
+| PickCube 批量数据 | `demos-batch/PickCube-v1/motionplanning/pickcube_batch10.{h5,json}` |
+
+**运行方式**：专家采集使用 `physx_cpu` 物理后端、`render_backend="cpu"`，并通过 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json` 指定 Vulkan 驱动。
+
+旧环境 `~/Coding/dp-manip-old-backup/.venv-mplib-probe` 同样报告 Python 3.11.15、ManiSkill 3.0.1、MPlib 0.2.1；原来的 `~/Coding/dp-manip/.venv-mplib-probe` 路径已不存在。
+
+### 已完成事项（9.22）
+
+- ✅ 确定六个 ManiSkill 任务：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。
+- ✅ 在 Ubuntu 上跑通 ManiSkill 的 CPU 仿真、Vulkan 初始化和 MPlib 专家规划。
+- ✅ 定位原始 `mplib==0.1.1` 在 Panda 规划器初始化时的崩溃问题，改用 `mplib==0.2.1` 并完成所需 API 适配。
+- ✅ 将适配保存为独立补丁 `patches/mani_skill_mplib_0_2_1.patch`，避免依赖手工修改第三方包。
+- ✅ 发现并排查 uv 硬链接导致的源码污染；在全新项目目录中绕过旧缓存、使用复制安装方式重新搭建环境。
+- ✅ 将新项目迁移为正式路径 `~/Coding/dp-manip`，并在最终路径重新创建虚拟环境。
+- ✅ 在正式路径验证：关键包版本正确、安装源码为原版、补丁应用成功、适配文件与已验证版本一致。
+- ✅ 在正式路径重新生成 1 条 PickCube 专家轨迹，成功率 1/1，并成功回放（`demos-final-verify/`、`demos-rebuild-verify/`）。
+- ✅ 采集并验收 10 条 PickCube 专家轨迹：10/10 规划成功、规划失败率 0、平均长度 72.6 步、最长 88 步。
+- ✅ 验证这 10 条轨迹的 H5/JSON 内容、动作有效性及 10 个互不相同的随机种子；逐条回放全部成功。
+
+### PickCube 批量验收结果（10 条）
+
+| 指标           | 结果          |
+| -------------- | ------------- |
+| 规划成功       | 10 / 10       |
+| 规划失败率     | 0             |
+| 平均轨迹长度   | 72.6 步       |
+| 最长轨迹       | 88 步         |
+| 随机种子       | 10 个互不相同 |
+| 动作有效性检查 | 通过          |
+| 逐条回放       | 全部成功      |
+
+---
+
+## 三、wsl：训练节点（9.23 M0 验证完成）
+
+| 项目        | 当前结果                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| 系统        | WSL2 Ubuntu 24.04.5 LTS；项目盘上次检查约有 951 GB 可用空间                                   |
+| 项目 Python | 3.11.15，虚拟环境 `~/projects/dp-manip/.venv`；系统 Python 为 3.12.3                           |
+| 环境管理    | uv 0.12.18；`uv.lock` 已生成；`uv pip check` 检查 31 个包，均兼容；虚拟环境未安装 pip 模块     |
+| 核心依赖    | PyTorch 2.14.0+cu130、NumPy 1.26.4、h5py 3.16.0                                               |
+| 尚未安装    | ManiSkill、torchvision、PyYAML、OmegaConf、Diffusers、Hydra；当前检查脚本不需要它们            |
+| GPU         | NVIDIA GeForce RTX 4090，计算能力 8.9；驱动 591.86；`nvidia-smi` 显示 CUDA 13.1，PyTorch 运行时 CUDA 13.0 |
+
+**已通过的 GPU 检查**：CUDA 可见性与 4×4 矩阵乘法（和为 120）；5 步 FP32 前向、反向与 AdamW 更新；5 步 fp16 AMP 更新。两种训练检查的损失和梯度均为有限值，参数确实改变，没有 CUDA 错误。FP32 与 AMP 峰值已分配显存分别为 16.44 MiB、16.40 MiB。这些是功能检查，不是性能测试。脚本：`scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py [--amp]`。受限的进程沙箱可能挡住 GPU 访问，即使普通 WSL shell 中可用。
+
+---
+
+## 四、PickCube 数据资产
+
+### 原始专家轨迹（`obs_mode: none`）
+
+```text
+ubuntu: ~/Coding/dp-manip/demos-batch/PickCube-v1/motionplanning/pickcube_batch10.{h5,json}
+wsl:    data/pickcube/pickcube_batch10.{h5,json}
+```
+
+- ubuntu 修改时间 2026-09-22 18:51:22；H5 270,942 字节，JSON 2,887 字节。
+- 任务 `PickCube-v1`，来源为运动规划，控制模式 `pd_joint_pos`，仿真与渲染后端均为 CPU；10 个 episode（seed 0–9）全部成功。
+- H5 顶层为 `traj_0`–`traj_9`，每组一条轨迹。动作长度 **74、74、50、86、76、88、71、74、49、84**（共 726 步）。
+- `actions` 为 `float32 (T, 8)`；`success`、`terminated`、`truncated` 为长度 T 的布尔数组。
+- `env_states/actors/{cube,goal_site,table-workspace}` 为 `float32 (T+1, 13)`，`env_states/articulations/panda` 为 `float32 (T+1, 31)`。
+- **`obs` 组为空**：原始文件只能用于检查链路，不能训练以观测为条件的策略。
+- JSON 的 `max_episode_steps` 是 50，但多条轨迹超过 50 步，且部分逐步 `terminated`/`truncated` 在组结束前已为真。**切分 episode 只能用 H5 组 + JSON ID。**
+
+### state 观测重放（M0）
+
+在 ubuntu 上确认过 ManiSkill 3.0.1 `replay_trajectory` 的参数，省略 `--target-control-mode` 即保留 `pd_joint_pos`。精确命令：
+
+```bash
+cd ~/Coding/dp-manip
+.venv/bin/python -m mani_skill.trajectory.replay_trajectory \
+  --traj-path demos-batch/PickCube-v1/motionplanning/pickcube_batch10.h5 \
+  --obs-mode state --save-traj --use-env-states \
+  --max-retry 0 --num-envs 1 --verbose
+```
+
+命令对未指定的 backend 参数发出过警告，但输出 JSON 确认 `sim_backend: cpu`，与原始一致；ubuntu 同时提示 GTX 1080 Ti 不受当前 PyTorch CUDA wheel 支持，因为用的是 CPU 仿真，不影响结果。未改动 ubuntu 环境，原始文件不变。
+
+```text
+ubuntu: ~/Coding/dp-manip/demos-batch/PickCube-v1/motionplanning/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,json}
+wsl:    data/pickcube/state/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,json}
+```
+
+- H5 395,070 字节，JSON 2,819 字节。
+- `traj_0`–`traj_9` 全部保留；seed、动作长度与原始一致，726 个动作逐值相同；10/10 成功。
+- 每条 `obs` 是**单个扁平数组**，没有具名子字段，`float32 (T+1, 42)`；`actions` 为 `float32 (T, 8)`。所有数值 NaN/Inf 均为 0。
+- 新 JSON 没有保留原始 JSON 的 `source_type/source_desc`，来源以本页记录为准。
+- `scripts/validate_replay.py` 可复查原始与重放的一致性；`scripts/inspect_dataset.py` 默认检查 state 文件。
+- `scripts/check_temporal_windows.py` 用真实 `obs` 验证历史 `obs[t-1:t+1]`、未来 `action[t:t+8]` 的首/中/末窗口：10 条轨迹共 646 个有效窗口，7 步短轨迹没有有效窗口，没有跨 episode 窗口。该检查只验证索引，不预设 padding 规则。
+
+### 哈希
+
+四个文件在 ubuntu、wsl、Mac 三端 SHA-256 一致，完整清单见 [manifests/](./manifests/)（9.23 生成并在 Mac 校验通过）：
+
+| 文件                 | SHA-256                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| 原始 H5              | `cf892707024bb18db7eb822fe9fe89f161fbcdd959d66571bd45740dc36e5c18` |
+| 原始 JSON            | `86496e8c9669bb59f9823f8bf192251bd6803fae76b8cb5d774e99119a3e5134` |
+| state H5             | `e303bffc79aafd902e5e37c12262eb6d9b718541d2cc687cd011f3f0ae509292` |
+| state JSON           | `5f395956a439fa1150a47a53fbdcf5d43ad37aaa7c07aa9efc03691b69be6b8a` |
+
+---
+
+## 五、控制模式：分析完成，尚未选择
+
+当前 `pd_joint_pos` 数据是 8 维；ubuntu 上 ManiSkill 3.0.1 的 PickCube 环境实测 `pd_ee_delta_pos` 动作空间为 4 维、范围 `[-1, 1]`。官方 [IL 重放脚本](https://github.com/mani-skill/ManiSkill/blob/main/scripts/data_generation/replay_for_il_baselines.sh) 给 PickCube 采用后者，原则是选择仍能完成任务的最简单控制器；[控制器文档](https://maniskill.readthedocs.io/en/latest/user_guide/concepts/controllers.html)将其描述为 3 维末端位移加 1 维夹爪。
+
+由此推断，4 维有界末端位移可能比 8 维关节目标更容易学会当前的抓取任务，但尚未在本项目上做效果比较。若改用它，需先把专家轨迹重放转换为该模式、验证转换成功率，并让评估环境使用同一控制模式和动作尺度；不能把当前 8 维文件直接交给 4 维策略。最终模式尚未决定。
+
+### 参考实现边界
+
+[Stanford Diffusion Policy](https://github.com/real-stanford/diffusion_policy) 可参考其模型、序列采样器、归一化器和训练配置。其[原始环境](https://github.com/real-stanford/diffusion_policy/blob/main/conda_environment.yaml)固定 Python 3.9、PyTorch 1.12.1、CUDA 11.6，**不照搬**。其 [Robomimic 低维数据读取器](https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/dataset/robomimic_replay_lowdim_dataset.py) 期望 `data/demo_i`，与 ManiSkill 的 `traj_i` 结构不同；[上游任务指南](https://github.com/real-stanford/diffusion_policy/blob/main/README.md#-adding-a-task)要求先有任务专属的 dataset、runner 和 shape 元数据，才能用 `train.py`。
+
+---
+
+## 六、过程回顾：Mac → Ubuntu → 第一条专家轨迹（9.22）
+
+完整原始记录见 [docs/history.md](./docs/history.md)。
+
+### Mac 上完成了什么
+
+| 项目       | 状态         | 结果                                                      |
+| ---------- | ------------ | --------------------------------------------------------- |
+| Python     | ✅ 9.22 完成 | 使用 Python 3.11                                          |
+| ManiSkill  | ✅ 9.22 完成 | 安装并能够运行（Mac 本地 `.venv`，gitignore）             |
+| 图形显示   | ✅ 9.22 完成 | Vulkan / MoltenVK 路径可用                                |
+| 机器人仿真 | ✅ 9.22 完成 | 能看到 PickCube 场景中的 Panda 机器人、红色方块和绿色目标 |
+| 动作测试   | ✅ 9.22 完成 | 能让机器人执行随机动作；看到的“抽搐乱动”并不是专家策略    |
+| Pinocchio  | ✅ 9.22 完成 | `pin` 已安装，`import pinocchio` 验证通过                 |
+| MPlib      | ❌ 未完成    | 未能成功安装（`libclang==11.0.1` 缺少 macOS ARM64 wheel） |
+
+因此决定让 Linux x86-64 服务器承担专家数据生成——**这是工作流分工，不是说 Mac 不能运行 ManiSkill。**
+
+### Ubuntu 排障三阶段（均已解决）
+
+1. **让 PickCube 场景正常运行**：专家命令最初直接 Segmentation fault。逐步缩小范围，确认 CPU 物理系统本身可工作，并用 `vulkaninfo` 验证 NVIDIA Vulkan 驱动可识别 GTX 1080 Ti；之后使用 `sim_backend="physx_cpu"` + `render_backend="cpu"`，成功完成 PickCube 创建、`reset()` 和关闭。
+2. **找到能够加载 Panda 的 MPlib 版本**：原环境 `mplib 0.1.1` 在初始化 `ArticulatedModel` 时段错误（URDF/SRDF 文件齐全、依赖声明检查通过）；单独降 NumPy 到 1.26.4 又引起其他包冲突。于是创建隔离环境 `.venv-mplib-probe`，安装 `mplib 0.2.1`，成功加载 `panda_v2.urdf` / `panda_v2.srdf` 并初始化 Panda 规划器。
+3. **适配新版 MPlib，生成专家轨迹**：ManiSkill 3.0.1 原本固定依赖 `mplib==0.1.1`，仅在测试环境覆盖该约束，并修复 `set_base_pose()` 与 `plan_screw()` 的接口差异；随后 PickCube 专家求解成功率 1/1，生成 H5 和 JSON。
+
+### 临时环境（已被正式环境取代）
+
+|          | 原环境 `.venv`                  | 临时成功的 `.venv-mplib-probe`                           |
+| -------- | ------------------------------- | -------------------------------------------------------- |
+| MPlib    | 0.1.1（专家规划初始化会段错误） | 0.2.1（PickCube 专家规划成功）                           |
+| 适配方式 | —                               | 手工修改 site-packages，未做成可自动应用的补丁           |
+| 现状     | —                               | ⚠️ 已被正式环境 `~/Coding/dp-manip/.venv` + 独立补丁取代 |
+
+版本覆盖与 API 适配现已分别固化为 `mplib-probe-overrides.txt` 和 `patches/mani_skill_mplib_0_2_1.patch`。
+
+### 第一条轨迹产出
+
+| 指标       | 结果                                                                                   |
+| ---------- | -------------------------------------------------------------------------------------- |
+| 成功率     | 1 / 1                                                                                  |
+| 轨迹长度   | 74 步                                                                                  |
+| 规划失败率 | 0                                                                                      |
+| 已保存文件 | H5 轨迹 29,734 字节 + JSON 元数据 871 字节（`demos-probe/`，已被 `demos-batch/` 取代） |
