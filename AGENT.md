@@ -52,6 +52,7 @@ SSH 别名定义在 `~/.ssh/config`。批量传输用 `rsync -a`（不带 `--del
 - 复现：`UV_PYTHON_INSTALL_DIR="$PWD/.python" UV_CACHE_DIR="$PWD/.uv-cache" uv venv --python 3.11.15 && uv sync --frozen`。
 - 不要重复跑已通过的 CUDA/训练 smoke test，除非环境变了或出错。
 - 非交互 SSH 的 PATH 不含 `uv`（`~/.local/bin`）和 `nvidia-smi`（`/usr/lib/wsl/lib`），远端命令要补 PATH 或写全路径。
+- 没有 NVIDIA Vulkan ICD。视频渲染走 Mesa lavapipe（`lvp_icd.json`，CPU 软件渲染）+ `render_backend="cpu"`，由 `dp_manip/envs.py` 的 `ensure_render_icd()` 自动设置（9.23 验证）。不要为此装驱动，也不要改系统里的 ICD。
 
 ### Mac
 

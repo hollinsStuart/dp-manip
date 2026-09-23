@@ -222,9 +222,29 @@ checkpoint 里除了网络权重（普通权重和 EMA 权重），还存了**�
 | `--split train` | 示范用过的种子，**诊断用**：链路正确时模型应能复现示范；如果这里也失败，说明评估环境和数据不一致，而不是泛化差 |
 | `--episodes N` | 只跑前 N 个种子 |
 | `--seed` | 扩散采样噪声的随机种子（默认 0） |
-| `--video` | 录第一个环境的视频（需要渲染；wsl 上还没验证过） |
+| `--save-states` | 保存每个回合的种子和逐步仿真状态，写到 `results/<exp>/states_<split>_<ckpt>/env<i>.{h5,json}`，每 10 个回合约 140 KB；不需要渲染，也不影响结果（9.23 实测 20 个回合逐回合一致）。用于事后高画质渲染，见下 |
+| `--video` | 录第一个环境的视频，每个回合一个 mp4，写到 `results/<exp>/videos_<split>_<ckpt>/`（9.23 已在 wsl 验证，见下） |
 
 100 个测试回合约 67 秒。
+
+**wsl 上的视频渲染**：WSL2 没有 NVIDIA 的 Vulkan 驱动（没有 `nvidia_icd.json`），不做处理时 SAPIEN 建渲染器会报 `ErrorIncompatibleDriver`。`dp_manip/envs.py` 的 `ensure_render_icd()` 会在需要录像时，自动把 `VK_ICD_FILENAMES` 设为 Mesa 的 lavapipe（`/usr/share/vulkan/icd.d/lvp_icd.json`，CPU 软件渲染）；如果手动设了 `VK_ICD_FILENAMES`，或者机器上有 NVIDIA ICD（比如 ubuntu），就不会改动。只有第一个环境渲染，每帧 512×512，约 0.2 秒。录像会拖慢这个环境，所以带 `--video` 的运行只用来看视频：它的 `mean_inference_ms` 和耗时不要写进报告，成功率仍以不带 `--video` 的测试结果为准。想录几段回合，可以用 `--episodes`：
+
+```bash
+.venv/bin/python scripts/eval_dp.py checkpoints/<exp>/final.pt --split test --episodes 20 --video
+```
+
+注意：这会**覆盖** `results/<exp>/test_final.json`。因为它只是部分回合，跑完后要不带 `--video` 重跑完整测试；也可以改用 `--split val`，避免碰到测试结果文件。
+
+**报告/展示用的高画质视频**：正式测试时加上 `--save-states`，然后用 `scripts/render_episodes.py` 离线回放渲染。回放时先按种子 reset，再逐步用 `set_state_dict` 恢复存下的状态，不跑策略也不跑物理，所以画面就是被评估的那个回合；分辨率、机位、shader 都可以事后另选。9.23 验证过：回放帧和评估时的实录逐帧对齐；用存下的状态重算每一步的成功判定，和录制时完全一致。
+
+```bash
+.venv/bin/python scripts/eval_dp.py checkpoints/<exp>/final.pt --save-states          # 完整测试 + 存状态
+.venv/bin/python scripts/render_episodes.py results/<exp>/states_test_final --seeds 10000 10010   # 默认 1080p 光栅化
+.venv/bin/python scripts/render_episodes.py results/<exp>/states_test_final --seeds 10010 \
+    --shader rt --eye 0.6 0.7 0.6 --target 0 0 0.35                                      # 光线追踪，自定机位
+```
+
+输出为 `results/<exp>/renders_<shader>_<W>x<H>/seed<seed>.mp4`（x264，`--crf` 默认 16）。wsl 上用 lavapipe 渲染，1080p 的耗时如下：`default` 每帧约 0.1 秒，一个回合约 7 秒；`rt` 每帧约 25 秒（8 线程），一个回合约 40 分钟，只适合挑几段、在训练空闲时跑；`rt-fast` / `rt-med` 依赖 OptiX 降噪器，lavapipe 没有，画面全是噪点。渲染和训练抢 CPU，**训练进行中不要跑**。
 
 ### 报告口径（9.23 决定）
 

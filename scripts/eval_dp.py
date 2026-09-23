@@ -14,6 +14,7 @@ Splits:
 Example (wsl):
   .venv/bin/python scripts/eval_dp.py checkpoints/pickcube_smoke/final.pt
   .venv/bin/python scripts/eval_dp.py checkpoints/pickcube_smoke/final.pt --split train
+  .venv/bin/python scripts/eval_dp.py checkpoints/pickcube_smoke/final.pt --save-states
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ def main() -> None:
     parser.add_argument("--split", choices=("test", "val", "train"), default="test")
     parser.add_argument("--episodes", type=int, help="evaluate only the first N seeds of the split")
     parser.add_argument("--video", action="store_true", help="record videos of the first env")
+    parser.add_argument("--save-states", action="store_true",
+                        help="save every episode's env states for offline rendering (scripts/render_episodes.py)")
     parser.add_argument("--seed", type=int, default=0, help="torch seed for diffusion sampling noise")
     args = parser.parse_args()
 
@@ -63,7 +66,8 @@ def main() -> None:
     # Largest env count <= eval.num_envs that divides the number of seeds.
     num_envs = max(n for n in range(1, min(cfg.eval.num_envs, len(seeds)) + 1) if len(seeds) % n == 0)
     envs = make_eval_envs(cfg, num_envs,
-                          video_dir=str(exp_dir / f"videos_{args.split}_{tag}") if args.video else None)
+                          video_dir=str(exp_dir / f"videos_{args.split}_{tag}") if args.video else None,
+                          states_dir=str(exp_dir / f"states_{args.split}_{tag}") if args.save_states else None)
     try:
         result = evaluate(policy, envs, seeds, device)
     finally:

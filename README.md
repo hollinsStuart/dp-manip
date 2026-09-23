@@ -144,7 +144,7 @@ Mac：权威仓库，发起所有同步；数据经 Mac 中转  ◀── rsync 
 | GPU 驱动    | 591.86（`nvidia-smi` 报 CUDA 13.1，PyTorch 运行时 CUDA 13.0）      |
 | 评估与 DP   | mani-skill 3.0.1、sapien 3.0.3、gymnasium 1.3.0（与 ubuntu 一致），diffusers 0.40.0 |
 | 校验脚本    | `scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py`、`scripts/check_dp_offline.py`、`scripts/replay_check.py` |
-| DP 脚本     | `scripts/train_dp.py`（训练 + 验证）、`scripts/eval_dp.py`（测试种子评估） |
+| DP 脚本     | `scripts/train_dp.py`（训练 + 验证）、`scripts/eval_dp.py`（测试种子评估）、`scripts/render_episodes.py`（按保存的状态离线渲染视频） |
 | 数据脚本    | `scripts/inspect_dataset.py`、`scripts/validate_replay.py`、`scripts/check_temporal_windows.py` |
 
 复现环境（wsl 项目根）：
