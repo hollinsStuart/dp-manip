@@ -52,7 +52,16 @@ dp-manip/
 - **数据**：rsync 传输，传完用 `manifests/*.sha256` 校验。
 - **训练产出**：从 wsl rsync `results/ checkpoints/ logs/` 回 Mac，不带 `--delete`。
 
-> 远端已挂接（PLAN 阶段 3）；同步脚本 `scripts/sync.sh` 尚未完成（阶段 4），在此之前手动执行上述 git 命令。
+日常用 `scripts/sync.sh`（仅在 Mac 执行）：
+
+```bash
+scripts/sync.sh status         # 三端 HEAD、工作区、数据清单
+scripts/sync.sh push           # Mac 提交后推到 ubuntu / wsl
+scripts/sync.sh fetch          # 取回 wsl 上的提交（仅 fast-forward）
+scripts/sync.sh data           # ubuntu demos-*/ → Mac，Mac data/ → wsl，并校验
+scripts/sync.sh manifest       # 新数据产生后重新生成清单，再提交
+scripts/sync.sh pull-results   # wsl 训练产出 → Mac
+```
 
 ---
 
@@ -205,6 +214,6 @@ cd ~/projects/dp-manip
 
 - ubuntu：PickCube 环境、专家生成、state 重放、回放链路全部通过；10/10 成功。
 - wsl：M0 训练节点验证完成（CUDA、FP32/AMP 训练、数据校验全通过）；正式训练尚未开始。
-- Mac：9.23 建为权威 git 仓库，ubuntu / wsl 已挂接；同步脚本待完成（TODO A）。
+- Mac：9.23 建为权威 git 仓库，ubuntu / wsl 已挂接，`scripts/sync.sh` 可用。
 
 下一步（详见 [TODO.md](./TODO.md)）：完成多设备工作流 → 确定控制模式（`pd_joint_pos` 8 维 vs `pd_ee_delta_pos` 4 维）与观测/动作 schema → 写 dataset adapter 与评估环境 → 跑通「专家轨迹 → 数据集 → DP 训练 → 评估」→ 扩展到六个任务。
