@@ -2,7 +2,8 @@
 """Re-render saved evaluation episodes offline, at any resolution and shader.
 
 Input is a states directory written by `eval_dp.py --save-states`
-(env<i>.{h5,json}: reset seed + env state at every step). Each chosen episode
+(env<i>.{h5,json}: reset seed + env state at every step), or any ManiSkill
+trajectory file with env_states, such as the expert demos. Each chosen episode
 is reset with its seed, then every recorded state is restored with
 set_state_dict and rendered, so the video shows exactly the evaluated episode;
 no policy or physics is run. Rendering is decoupled from evaluation, so slow
@@ -16,6 +17,7 @@ Example (wsl):
   .venv/bin/python scripts/render_episodes.py results/<exp>/states_test_final --seeds 10000 10010
   .venv/bin/python scripts/render_episodes.py results/<exp>/states_test_final --seeds 10010 \\
       --shader rt --width 1920 --height 1080 --eye 0.6 0.7 0.6 --target 0 0 0.35
+  .venv/bin/python scripts/render_episodes.py data/pickcube/pickcube_batch100.h5   # expert demos
 """
 
 from __future__ import annotations
@@ -33,22 +35,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dp_manip.envs import ensure_render_icd  # noqa: E402
 
 
-def load_episodes(states_dir: Path) -> dict[int, tuple[Path, dict, dict]]:
-    """seed -> (h5 path, episode record, env_info) over all env<i> files."""
+def load_episodes(source: Path) -> dict[int, tuple[Path, dict, dict]]:
+    """seed -> (h5 path, episode record, env_info) over a trajectory file or all env<i> files of a dir."""
     found = {}
-    for json_path in sorted(states_dir.glob("env*.json")):
+    json_paths = sorted(source.glob("env*.json")) if source.is_dir() else [source.with_suffix(".json")]
+    for json_path in json_paths:
         meta = json.loads(json_path.read_text())
         for ep in meta["episodes"]:
             seed = int(ep["reset_kwargs"].get("seed", ep["episode_seed"]))
             found[seed] = (json_path.with_suffix(".h5"), ep, meta["env_info"])
     if not found:
-        raise SystemExit(f"no env*.json episodes in {states_dir}")
+        raise SystemExit(f"no episodes in {source}")
     return found
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("states_dir", type=Path)
+    parser.add_argument("source", type=Path, help="eval states dir, or a trajectory .h5/.json")
     parser.add_argument("--seeds", type=int, nargs="+", help="episodes to render (default: all)")
     parser.add_argument("--shader", default="default", choices=("default", "rt", "rt-med", "rt-fast", "minimal"))
     parser.add_argument("--width", type=int, default=1920)
@@ -58,7 +61,8 @@ def main() -> None:
     parser.add_argument("--target", type=float, nargs=3, help="point the camera looks at (with --eye)")
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--crf", type=int, default=16, help="x264 quality, lower is better (default 16)")
-    parser.add_argument("--out", type=Path, help="output directory (default: <states_dir>/../renders_<shader>_<W>x<H>)")
+    parser.add_argument("--out", type=Path, help="output directory (default: <states_dir>/../renders_<shader>_<W>x<H>, "
+                        "or results/demos/<file stem>/renders_<shader>_<W>x<H> for a trajectory file)")
     args = parser.parse_args()
     if (args.eye is None) != (args.target is None):
         parser.error("--eye and --target go together")
@@ -71,12 +75,18 @@ def main() -> None:
     from mani_skill.trajectory import utils as trajectory_utils
     from mani_skill.utils import sapien_utils
 
-    episodes = load_episodes(args.states_dir)
+    episodes = load_episodes(args.source)
     seeds = args.seeds or sorted(episodes)
     missing = [s for s in seeds if s not in episodes]
     if missing:
-        raise SystemExit(f"seeds not in {args.states_dir}: {missing}")
-    out_dir = args.out or args.states_dir.parent / f"renders_{args.shader}_{args.width}x{args.height}"
+        raise SystemExit(f"seeds not in {args.source}: {missing}")
+    name = f"renders_{args.shader}_{args.width}x{args.height}"
+    if args.out:
+        out_dir = args.out
+    elif args.source.is_dir():
+        out_dir = args.source.parent / name
+    else:  # keep renders out of data/, whose files are checksummed in manifests/
+        out_dir = Path(__file__).resolve().parents[1] / "results" / "demos" / args.source.stem / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     camera = dict(shader_pack=args.shader, width=args.width, height=args.height)

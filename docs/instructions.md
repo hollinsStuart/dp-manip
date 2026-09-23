@@ -244,6 +244,12 @@ checkpoint 里除了网络权重（普通权重和 EMA 权重），还存了**�
     --shader rt --eye 0.6 0.7 0.6 --target 0 0 0.35                                      # 光线追踪，自定机位
 ```
 
+专家示范也能这样渲染：原始轨迹 h5 本身就存了逐步状态和种子，直接把文件传进去即可，输出在 `results/demos/<文件名>/`（不写进 `data/`，以免影响数据清单）：
+
+```bash
+.venv/bin/python scripts/render_episodes.py data/pickcube/pickcube_batch100.h5 --seeds 0 1 2
+```
+
 输出为 `results/<exp>/renders_<shader>_<W>x<H>/seed<seed>.mp4`（x264，`--crf` 默认 16）。wsl 上用 lavapipe 渲染，1080p 的耗时如下：`default` 每帧约 0.1 秒，一个回合约 7 秒；`rt` 每帧约 25 秒（8 线程），一个回合约 40 分钟，只适合挑几段、在训练空闲时跑；`rt-fast` / `rt-med` 依赖 OptiX 降噪器，lavapipe 没有，画面全是噪点。渲染和训练抢 CPU，**训练进行中不要跑**。
 
 ### 报告口径（9.23 决定）
