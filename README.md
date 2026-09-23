@@ -4,6 +4,7 @@
 
 - 当前状态：[STATUS.md](./STATUS.md)
 - 未完成事项：[TODO.md](./TODO.md)
+- 课程要求与进度对照：[docs/requirements.md](./docs/requirements.md)
 - 面向编码代理的操作约束：[AGENT.md](./AGENT.md)
 - 多设备工作流计划：[PLAN.md](./PLAN.md)
 - Day 1 原始记录：[docs/history.md](./docs/history.md)
