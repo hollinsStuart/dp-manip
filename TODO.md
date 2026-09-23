@@ -26,7 +26,8 @@
 - [x] 选定 DP 实现来源：ManiSkill 官方基线 `examples/baselines/diffusion_policy`（@62ff3a5），与原版 DP 同一 UNet；出处与改动见 `dp_manip/README.md`。
 - [x] 接入所需的 Diffusion Policy 模型与采样组件，补齐与训练控制模式一致的 ManiSkill 评估环境（9.23 阶段 2：wsl 装 mani-skill 3.0.1 + diffusers，开环回放 10/10）；只按确定的需求新增依赖，不照搬上游旧环境。
 - [x] 在小样本上做加载、单批前向/反向和评估接口检查，然后用少量 PickCube 数据跑通 **「专家轨迹 → (observation, action) 数据集 → DP 训练 → 策略评估」** 完整链路。（9.23：10 条示范 30k 步，训练种子 10/10，测试种子 2–3%。）
-- [ ] 下次推送后在 wsl 复跑 `eval_dp.py --split train` 验证新参数。
+- [x] 下次推送后在 wsl 复跑 `eval_dp.py --split train` 验证新参数。（9.23：`best.pt` 训练种子 10/10，与临时诊断一致。）
+- [ ] 训练脚本记录峰值显存，用来判断同一张卡上能否并行跑多个实验。
 - [ ] 采集足量 PickCube 示范（先 100 条，与官方基线同量级），得到第一个可信的 PickCube 基线；同时可以决定是否转换到 `pd_ee_delta_pos`。
 
 ## C. 完成六任务专家数据集
