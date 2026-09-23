@@ -8,14 +8,14 @@
 
 ---
 
-## A. 多设备工作流（进行中，见 [PLAN.md](./PLAN.md)）
+## A. 多设备工作流（9.23 完成，见 [PLAN.md](./PLAN.md)）
 
 - [x] 阶段 0：ubuntu / wsl 打包备份 `~/dp-manip-pre-git-20260923.tgz`。
 - [x] 阶段 1：Mac 建仓，写 `.gitignore`，添加 `ubuntu` / `wsl` 两个 remote。
 - [x] 阶段 2：导入代码与文档，数据 rsync 到 Mac，生成 `manifests/*.sha256` 并校验，合并中文文档，首次提交。
 - [x] 阶段 3：挂接 ubuntu / wsl；两端 HEAD 与 Mac 一致，数据与 `.venv` 未变。
 - [x] 阶段 4：编写 `scripts/sync.sh`（`push` / `fetch` / `pull-results` / `data` / `manifest` / `status`）。
-- [ ] 阶段 5：往返验证。
+- [x] 阶段 5：往返验证（Mac → 远端、wsl → Mac → ubuntu、远端有改动时拒绝 push）。
 
 ## B. DP 接入准备（P1，尚未开始）
 

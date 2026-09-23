@@ -26,7 +26,7 @@
 | 2 | ✅ 9.23 | 导入代码与文档；数据 rsync 到 Mac，12 个文件按清单校验通过；文档合并；首次提交 |
 | 3 | ✅ 9.23 | 两端 `git init` + `updateInstead`；wsl 原 `.git` → `.git.bak`（写入 `.git/info/exclude`）；推到 `incoming` 比对：代码全部 SAME/NEW，仅 wsl 的 `.gitignore` 与三份文档 DIFF（预期）；`reset --hard` 后两端 HEAD `3f69b79`、工作区干净；ubuntu `~/.zshenv` 加 `UV_PROJECT_ENVIRONMENT`；两端清单校验通过，`.venv` 关键包版本不变 |
 | 4 | ✅ 9.23 | `scripts/sync.sh`：`status` / `manifest`（重新生成与已提交清单一致）/ `pull-results`（wsl 暂无产出）/ `data`（两段传输后校验通过）均已实测 |
-| 5 | ⏳ | 进行中：24 Mac push → 两端 `a7c1f08` ✅；25 本条由 wsl 提交、Mac fetch 取回 |
+| 5 | ✅ 9.23 | 24 Mac push → 两端 `a7c1f08`；25 wsl 提交 `5e56296` → Mac `fetch` fast-forward → push 给 ubuntu；26 wsl `verify_cuda.py` 通过、ubuntu 关键包版本不变、三端清单 OK、工作区干净；另测 wsl 有未提交改动时 Mac push 被 `updateInstead` 拒绝、ubuntu 照常更新 |
 
 ## 现状（9.23 只读核实，执行前）
 
