@@ -199,6 +199,26 @@ wsl:    data/pickcube/state/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,js
 
 **阶段 C（数据中转）**：ubuntu `demos-batch/` → Mac（`rsync -a`，4 个新文件哈希与上表一致）→ 用 `cp -n` 复制进 Mac `data/pickcube/` 与 `data/pickcube/state/` → `sync.sh data` 同步到 wsl → `sync.sh manifest` 重新生成清单：`ubuntu-demos.sha256` 8 → 12 个文件，`wsl-data.sha256` 4 → 8 个文件，**只有新增、没有删除或改动**；Mac 副本对两份新清单校验通过。
 
+### 其余五个任务试跑（9.24，ubuntu）
+
+目的：确认另外 5 个任务的专家数据生成与 PickCube 一样可行，现有 MPlib 补丁够用。每个任务单进程生成 1 条成功轨迹（`--only-count-success -n 1`，5 分钟超时保护），再做 state 重放和 `validate_replay.py`。输出在 ubuntu `demos-taskprobe/<env>/motionplanning/probe_*`（共 608 KB，属于 `demos-*`，不进 git，未加入清单），日志 `logs/taskprobe_0924.log`。代码 `91937f8`，ubuntu 工作区保持干净。
+
+| 任务 | 采集 | 重放 | 校验 | 种子 | 轨迹长度 | state 观测维数 | ManiSkill 默认回合上限 | 官方 DP 基线评估长度 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| PushCube-v1 | 3 s | 4 s | PASS | 0 | 71 | 35 | 50 | 100 |
+| PullCube-v1 | 4 s | 3 s | PASS | 0 | 67 | 35 | 50 | 无 |
+| StackCube-v1 | 4 s | 4 s | PASS | 0 | 107 | 48 | 50 | 200 |
+| LiftPegUpright-v1 | 4 s | 4 s | PASS | 0 | 176 | 32 | 50 | 无 |
+| PegInsertionSide-v1 | 7 s | 6 s | PASS | **2**（0、1 执行未成功） | 178 | 43 | 100 | 300 |
+
+结论与影响：
+
+- **六个任务的专家数据生成都已验证可行**，现有补丁 `patches/mani_skill_mplib_0_2_1.patch` 够用，没有遇到未适配的 MPlib 接口。整批 43 秒。
+- **评估回合长度要按任务设**：ManiSkill 默认上限（50 / 100）是给强化学习调的，比示范短；StackCube、LiftPegUpright、PegInsertionSide 的示范已有 107–178 步，需要 200–300 步的回合。
+- **GPU 时间随之增加**：评估耗时与回合长度成正比。按 PickCube 实测（训练约 9 分钟、100 步回合时 6 次验证约 3 分钟、测试约 1 分钟）估算，每组约为 PushCube / PullCube 13.5 分钟、StackCube（200 步）约 17 分钟、LiftPegUpright / PegInsertionSide（300 步）约 21 分钟；5 个任务 × 3 个训练种子约 **4.3 小时**。这是估算，示范变长后训练窗口数也会变，要实测修正。
+- **PegInsertionSide 的专家成功率约 1/3**（这次的进度条显示 success_rate 0.333，失败是执行未成功而非规划报错），采集 100 条约需试 300 个种子。成功与否可能和初始状态有关，采集后要检查成功种子的分布。
+- 观测维数各不相同（32–48），`dp_manip` 从数据读取维数，不需要改代码；每个任务需要一份自己的配置文件。
+
 ### 哈希
 
 四个文件在 ubuntu、wsl、Mac 三端 SHA-256 一致，完整清单见 [manifests/](./manifests/)（9.23 生成并在 Mac 校验通过）：
