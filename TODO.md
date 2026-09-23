@@ -17,7 +17,7 @@
 - [x] 阶段 4：编写 `scripts/sync.sh`（`push` / `fetch` / `pull-results` / `data` / `manifest` / `status`）。
 - [x] 阶段 5：往返验证（Mac → 远端、wsl → Mac → ubuntu、远端有改动时拒绝 push）。
 
-## B. DP 接入准备（P1，9.23 进行中：阶段 1–2 已完成）
+## B. DP 接入准备（P1，9.23 完成：链路已跑通）
 
 - [ ] 在 `pd_joint_pos` 8 维与 `pd_ee_delta_pos` 4 维之间正式选定控制模式。（9.23：跑通链路先用现有 `pd_joint_pos` 数据，靠动作归一化处理范围；`pd_ee_delta_pos` 之后转换，可作为「动作表示」对比。）官方 IL 示例采用后者，但目前只完成了比较分析；若选后者，先转换一小批并验证成功率，再规划大规模转换。
 - [ ] 明确训练用的 42 维扁平 state 向量定义、动作表示和缩放方式；不要仅凭文件名推断各维语义。训练数据与评估环境必须使用同一控制模式。
@@ -25,7 +25,9 @@
 - [x] 编写 ManiSkill H5/JSON → 训练样本的 dataset adapter（`dp_manip/data.py`）；以 H5 `traj_*` 组和 JSON ID 划分 episode，不依据可能提前变真的逐步 `terminated`/`truncated`。
 - [x] 选定 DP 实现来源：ManiSkill 官方基线 `examples/baselines/diffusion_policy`（@62ff3a5），与原版 DP 同一 UNet；出处与改动见 `dp_manip/README.md`。
 - [x] 接入所需的 Diffusion Policy 模型与采样组件，补齐与训练控制模式一致的 ManiSkill 评估环境（9.23 阶段 2：wsl 装 mani-skill 3.0.1 + diffusers，开环回放 10/10）；只按确定的需求新增依赖，不照搬上游旧环境。
-- [ ] 在小样本上做加载、单批前向/反向和评估接口检查，然后用少量 PickCube 数据跑通 **「专家轨迹 → (observation, action) 数据集 → DP 训练 → 策略评估」** 完整链路。
+- [x] 在小样本上做加载、单批前向/反向和评估接口检查，然后用少量 PickCube 数据跑通 **「专家轨迹 → (observation, action) 数据集 → DP 训练 → 策略评估」** 完整链路。（9.23：10 条示范 30k 步，训练种子 10/10，测试种子 2–3%。）
+- [ ] 下次推送后在 wsl 复跑 `eval_dp.py --split train` 验证新参数。
+- [ ] 采集足量 PickCube 示范（先 100 条，与官方基线同量级），得到第一个可信的 PickCube 基线；同时可以决定是否转换到 `pd_ee_delta_pos`。
 
 ## C. 完成六任务专家数据集
 

@@ -1,6 +1,6 @@
 # dp-manip 当前状态
 
-**最后更新：9.23（B 节阶段 2）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
+**最后更新：9.23（B 节阶段 3）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
 
 > 本文件由 Mac 原 `progress.md` 与 wsl 原 `STATUS.md` 合并而成（9.23）。
 
@@ -10,10 +10,10 @@
 
 - **ubuntu**：PickCube 的环境、专家生成、数据保存、回放链路全部通过；10/10 成功；已重放出 `obs_mode: state` 数据。
 - **wsl**：**M0 训练节点验证完成**。Python、CUDA、RTX 4090 小规模训练能力已验证；state 数据在 wsl 上通过了哈希、观测与动作对齐、时间窗口、episode 边界检查。
-- **wsl（9.23 B 节阶段 2）**：已装 ManiSkill 3.0.1 评估环境与 diffusers；PickCube 评估环境开环回放 10/10 成功，与 ubuntu 逐条一致。DP 代码在 `dp_manip/`，见下文「DP 链路」。
+- **wsl（9.23 B 节阶段 2–3）**：已装 ManiSkill 3.0.1 评估环境与 diffusers；PickCube 评估环境开环回放 10/10 成功，与 ubuntu 逐条一致。**「专家轨迹 → 数据集 → DP 训练 → 闭环评估」链路已在 PickCube 上跑通**：10 条示范训练 30k 步，训练种子 10/10，测试种子只有 2–3%（过拟合，不是 bug）。详见下文「DP 链路」。
 - **Mac**：9.23 起成为唯一权威 git 仓库，代码、配置、文档都从 ubuntu 和 wsl 汇总到这里（见 [PLAN.md](./PLAN.md)）。
 
-尚未进行：DP 正式训练与闭环评估（B 节阶段 3）、六任务数据收集、RGB 重放与视频、控制模式转换。
+尚未进行：足量数据的 PickCube 基线、六任务数据收集、RGB 重放与视频、控制模式转换。
 
 ---
 
@@ -100,6 +100,28 @@ Mac 上离线检查 6 项全过；Mac 的仿真环境是 `mani_skill_nightly 202
 | 验收 | torch `2.14.0+cu130` 且 CUDA 可用；`verify_cuda.py` 通过；`check_dp_offline.py --device cuda` 6 项通过；`replay_check.py` 10/10，逐条数值与 ubuntu 完全相同 |
 
 偏差：无。wsl 非交互 SSH 的 PATH 里没有 `uv`（在 `~/.local/bin`）和 `nvidia-smi`（在 `/usr/lib/wsl/lib`），远端命令需写全路径或补 PATH。
+
+**阶段 3（wsl，代码 `9ae8ae4`）**：
+
+| 实验 | 设置 | 结果 |
+| --- | --- | --- |
+| `pickcube_smoke` | 300 步，验证 10 种子 ×2 次；`eval_dp.py` 测试 10 种子 | 训练、并行验证（10 个 CPU 子环境）、`best.pt`/`final.pt`、测试评估全部正常；成功率 0（预期） |
+| `pickcube_jointpos_10demo_30k` | 10 条示范（726 步），官方超参：30k 步、batch 1024、lr 1e-4 cosine、EMA；每 5k 步 50 个验证种子 | 训练 687 s（约 23 ms/步），最终损失 0.0011；验证 success_once 依次 0.02 / 0.04 / 0.04 / 0.06 / 0.06 / 0.06，`best.pt` = 第 20000 步 |
+
+测试集（种子 10000–10099，各 100 回合）：
+
+| checkpoint | success_once | success_at_end | 成功的种子 |
+| --- | --- | --- | --- |
+| `best.pt`（20k） | **0.03** | 0.01 | 10011、10022、10077 |
+| `final.pt`（30k） | **0.02** | 0.01 | 10022、10077 |
+
+**诊断：在训练种子 0–9 上评估同一模型，`best.pt` 与 `final.pt` 都是 10/10。** 模型能在见过的初始条件下完整复现示范，说明观测对齐、动作归一化 / 反归一化、控制模式、动作分块执行都正确；测试集成功率低是 10 条示范只覆盖 10 种方块 / 目标位置导致的过拟合，不是链路 bug。此诊断已固化为 `scripts/eval_dp.py --split train`（Mac 提交，尚未在 wsl 复跑）。
+
+其他记录：
+- 推理：100 步 DDPM、10 个环境一批，约 426 ms / 次；一个 100 步回合要推理 13 次，100 个测试回合约 60 s。可作为「推理速度」研究（如 DDIM 减步）的基线。
+- 资源：RTX 4090，torch 2.14.0+cu130，UNet 4.39M 参数；checkpoint 每个约 34 MB。
+- 产出已用 `sync.sh pull-results` 取回 Mac：`results/`、`checkpoints/`、`logs/pickcube_jointpos_10demo_30k.log`。
+- 偏差：临时诊断脚本从标准输入运行时，`forkserver` 子进程找不到主模块而失败，改用单环境完成；以后诊断一律用 `eval_dp.py --split`。
 
 ---
 
