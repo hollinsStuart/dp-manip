@@ -22,9 +22,9 @@
 
 ### 每一步在仓库里对应什么
 
-| 步骤 | 机器 | 代码 / 配置 | 待办 | 进度（9.23） |
+| 步骤 | 机器 | 代码 / 配置 | 待办 | 进度（9.24） |
 | --- | --- | --- | --- | --- |
-| **1. 专家轨迹** | ubuntu 生成（运动规划 + state 重放）；Mac 中转；wsl 使用 | `run_cpu.py`、`patches/`；重放用 `mani_skill.trajectory.replay_trajectory`；校验用 `scripts/validate_replay.py`、`inspect_dataset.py` | [TODO C](./TODO.md) | 六个任务已选定：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。**只有 PickCube 有数据**（10 条），正在扩到 100 条；其余 5 个任务未开始 |
+| **1. 专家轨迹** | ubuntu 生成（运动规划 + state 重放）；Mac 中转；wsl 使用 | `run_cpu.py`、`patches/`；重放用 `mani_skill.trajectory.replay_trajectory`；校验用 `scripts/validate_replay.py`、`inspect_dataset.py` | [TODO C](./TODO.md) | 六个任务已选定：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。PickCube 已采集 100 条并做了 state 重放；其余 5 个任务各试跑 1 条，专家生成与回放全部通过（9.24），正式采集未开始 |
 | **2. 训练 DP** | wsl | `dp_manip/`、`scripts/train_dp.py`、`configs/*.toml` | [TODO B](./TODO.md) | 训练代码完成；PickCube 基线：100 条示范，final.pt 测试成功率 **0.67**（3 个训练种子平均，范围 0.53–0.77；见 [docs/0923-2249.md](./docs/0923-2249.md)） |
 | **3. 评估 + 消融** | wsl | `scripts/eval_dp.py`（`--split test/val/train`）、`scripts/replay_check.py` | [TODO D](./TODO.md) | 评估完成：固定测试种子、逐种子结果。数据量消融 PickCube 10/25/50/100 条 × 3 个训练种子已完成：平均 0.02 / 0.13 / 0.56 / 0.67 |
 

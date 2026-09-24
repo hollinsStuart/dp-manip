@@ -67,18 +67,18 @@
 
 ---
 
-## 六、对照当前进度（9.23）
+## 六、对照当前进度（9.24）
 
 | 要求 | 状态 | 对应 TODO |
 |------|------|-----------|
 | 六任务选定 | ✅ PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide；PushCube 和 PullCube 较接近，报告需说明各自考察的技能 | C |
-| 各任务观测、动作、成功判据说明 | ❌ | D |
-| 专家示范 | 🟡 仅 PickCube 完成 10 条，已做 state 重放 | C |
-| DP 实现 | ❌ 未选定来源：原版 DP 或 ManiSkill 自带的 `examples/baselines/diffusion_policy` | B |
-| 评估环境 | ❌ wsl 尚未安装 ManiSkill | B |
-| 六任务 baseline | ❌ | D |
-| 研究问题 | ❌ 未定题；候选为数据效率（25/50/100/200 条嵌套子集） | D |
-| held-out 评估与失败分析 | ❌ | D |
-| 六任务视频（示范生成 + rollout） | ❌ 需要 RGB 渲染 | D |
+| 各任务观测、动作、成功判据说明 | ❌ | C |
+| 专家示范 | 🟡 PickCube 完成 100 条并做了 state 重放；其余 5 个任务各试跑 1 条，生成与回放全部通过，正式采集未开始 | C |
+| DP 实现 | ✅ ManiSkill 官方 `examples/baselines/diffusion_policy`（@62ff3a5），改动见 `dp_manip/README.md`；控制模式（`pd_joint_pos` / `pd_ee_delta_pos`）尚未正式选定 | B |
+| 评估环境 | ✅ wsl 已装 ManiSkill 3.0.1，PickCube 开环回放 10/10 | B |
+| 六任务 baseline | 🟡 仅 PickCube：100 条示范，final.pt 测试成功率 3 个训练种子平均 0.67（0.53–0.77） | D |
+| 研究问题 | 🟡 候选为数据效率；PickCube 10/25/50/100 条 × 3 个训练种子已完成（平均 0.02/0.13/0.56/0.67），下一步补种子或加 200 条一档 | D |
+| held-out 评估与失败分析 | 🟡 PickCube 在测试种子 10000–10099 上评估完成；失败分析未完成 | B、D |
+| 六任务视频（示范生成 + rollout） | 🟡 wsl 策略 rollout 录像已打通（PickCube 有样例）；专家生成过程的录像未做 | D |
 | 报告、展示、贡献声明、LLM 声明 | ❌ | D |
 | 提案（Lecture 5 前） | ❓ 未在仓库记录 | D |
