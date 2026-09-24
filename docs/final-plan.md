@@ -25,16 +25,17 @@
 
 ## 1. 六个任务
 
-| # | 任务 | 技能 | 成功判据 | 控制模式（动作维数） | 评估回合长度 | 训练步数 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | PickCube-v1 | 抓取 + 搬运到空中目标 | 方块距目标 ≤ 2.5 cm，**且**机械臂静止 | `pd_ee_delta_pos`（4） | 100 | 30k |
-| 2 | StackCube-v1 | 抓取 + 精确放置（两阶段） | cubeA 落在 cubeB 上、已松开、静止 | `pd_ee_delta_pos`（4） | 200 | 30k |
-| 3 | PushCube-v1 | 非抓取：从近侧往外**推** | 方块进入 goal_region | `pd_ee_delta_pos`（4） | 100 | 30k |
-| 4 | PullCube-v1 | 非抓取：绕到方块远侧往回**拉** | 方块进入 goal_region | `pd_ee_delta_pos`（4） | 100 | 30k |
-| 5 | PegInsertionSide-v1 | 抓取 + 紧公差侧向插入 | peg 头部进入孔中 | `pd_ee_delta_pose`（7） | 300 | 100k |
-| 6 | PlugCharger-v1 | 抓取 + 位置和姿态对准的插接 | 距离 ≤ 5 mm **且**角度误差 ≤ 0.2 rad | `pd_ee_delta_pose`（7） | 200* | 100k |
+| # | 任务 | 技能 | 成功判据 | 控制模式（动作维数） | 评估回合长度 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | PickCube-v1 | 抓取 + 搬运到空中目标 | 方块距目标 ≤ 2.5 cm，**且**机械臂静止 | `pd_ee_delta_pos`（4） | 100 |
+| 2 | StackCube-v1 | 抓取 + 精确放置（两阶段） | cubeA 落在 cubeB 上、已松开、静止 | `pd_ee_delta_pos`（4） | 200 |
+| 3 | PushCube-v1 | 非抓取：从近侧往外**推** | 方块进入 goal_region | `pd_ee_delta_pos`（4） | 100 |
+| 4 | PullCube-v1 | 非抓取：绕到方块远侧往回**拉** | 方块进入 goal_region | `pd_ee_delta_pos`（4） | 100 |
+| 5 | PegInsertionSide-v1 | 抓取 + 紧公差侧向插入 | peg 头部进入孔中 | `pd_ee_delta_pose`（7） | 300 |
+| 6 | PlugCharger-v1 | 抓取 + 位置和姿态对准的插接 | 距离 ≤ 5 mm **且**角度误差 ≤ 0.2 rad | `pd_ee_delta_pose`（7） | 200* |
 
-- **控制模式、回合长度和训练步数都取自 ManiSkill 官方 DP 基线的 `baselines.sh`**：PickCube、PushCube、StackCube 用 30k 步，PegInsertionSide 用 100k 步，要转动末端的任务用 `pd_ee_delta_pose`。PullCube 没有官方值，按 PushCube 取；PlugCharger 也没有官方值，按 PegInsertionSide 取。
+- **控制模式和回合长度取自 ManiSkill 官方 DP 基线的 `baselines.sh`**：要转动末端的任务用 `pd_ee_delta_pose`。PullCube 没有官方值，按 PushCube 取；PlugCharger 也没有官方值，按 PegInsertionSide 取。
+- **训练步数六个任务统一为 100k**（§3），取官方各任务中的最大值（PegInsertionSide），不再按任务区分。官方给 PickCube、PushCube、StackCube 的是 30k。
 - *回合长度的规则：取 max(官方值, 示范平均长度 × 2)，再向上取整到 50 的倍数（「平均长度 × 2」是官方 README 的建议）。PlugCharger 的 200 是 ManiSkill 注册的默认值，采集完数据后按这条规则最终确定。
 - **PullCube 不抓取方块**。ManiSkill 的专家求解器先闭合夹爪，把末端移到方块远侧，再往回拉。VariDP 教程把它写成「抓取 + 拖拽」，那是因为他们用的是自己写的脚本控制器；我们用官方求解器生成数据，所以报告里按「非抓取、与 PushCube 方向相反」来写。
 - PlugCharger 还没试跑过，要先确认专家能生成、控制模式能转换（§2.3 关卡）。如果不通过，换成 LiftPegUpright-v1（已试跑通过，控制模式用 `pd_ee_delta_pose`）。
@@ -95,7 +96,7 @@
 | 优化 | 优化器 | AdamW，lr 1e-4，betas (0.95, 0.999)，weight decay 1e-6 | 官方基线 |
 | | 学习率调度 | cosine，warmup 500 步 | 官方基线 |
 | | batch | 1024，从全部训练窗口中有放回均匀采样 | 官方基线；有放回是为了 N 小时也能组成完整的 batch |
-| | 训练步数 | 见 §1（30k 或 100k） | 官方 `baselines.sh` |
+| | 训练步数 | **100k，六个任务、所有 N、所有主干都相同** | 取官方 `baselines.sh` 中的最大值（PegInsertionSide）。统一之后，不同任务之间数据需求的差异不会和训练预算的差异混在一起（9.24 决定） |
 | | EMA | diffusers `EMAModel`，与官方基线相同的调用方式 | 官方基线 |
 | 检查点 | 报告用 | `final.pt`（训练结束时的 EMA 权重） | pilot 中按验证挑出的检查点在测试集上反而更差 |
 
@@ -118,7 +119,7 @@
 | --- | --- |
 | 自变量 | N ∈ {25, 50, 100, 200}，取示范池的前 N 条 |
 | 主干 | UNet（B0） |
-| 训练步数 | 按任务固定（§1），**与 N 无关**：N 越小，每条数据被重复看的次数越多，这正是「数据少」的真实情况。报告里写明口径是「固定步数」而不是「固定 epoch」 |
+| 训练步数 | 100k（§3），**与 N、任务都无关**：N 越小，每条数据被重复看的次数越多，这正是「数据少」的真实情况。报告里写明口径是「固定步数」而不是「固定 epoch」 |
 | 归一化统计量 | 按各自的 N 条计算。所以验证去噪 loss 只在同一个 N 内部比较 |
 | 其他 | 与 §3、§4 完全相同，验证集和测试集对所有 N 都一样 |
 | 格子 | 6 任务 × 4 档 × 3 个种子 = 72 次 |
@@ -176,7 +177,8 @@
 | --- | --- | --- | --- |
 | 示范来源 | 下载官方数据后转换；另用自写脚本控制器生成 2–3 个任务 | 自己运行官方运动规划器，六个任务全部自己生成 | 课程明确规定只下载数据不算完成；我们的 Linux 机器上 mplib 可用 |
 | 控制模式 | `pd_ee_delta_pos`；Peg、Plug 用 `pd_ee_delta_pose` | **采纳** | 与官方基线一致，可以和官方结果对照 |
-| 回合长度、训练步数 | 按 `baselines.sh` | **采纳**（30k / 100k） | 同上 |
+| 回合长度 | 按 `baselines.sh` | **采纳** | 同上 |
+| 训练步数 | 按 `baselines.sh`（30k / 100k）；他的实测里 batch 256 × 30k 步明显训练不足 | 六个任务统一 100k，batch 1024 | 取最大值统一，简单任务也不会训练不足；任务之间可以直接比较 |
 | 训练 / 测试种子 | 训练用 0…n−1，测试用 2000–2049（50 回合） | 训练池从 0 起，验证用 3000+ 和 5000–5049，**测试用 10000–10099（100 回合）** | 测试回合多一倍，评估噪声更小；验证与测试分开。**全组要统一用一套种子** |
 | 验证集 | 从同一批示范里随机划出 10%，划分随训练种子和 `demo_frac` 变化 | 固定的 20 条独立验证示范 | 保证所有 N、所有主干用的是同一个验证集，loss 才能互相比较 |
 | 挑选检查点 | 取验证 loss 最低的 `best.pt` | 固定用 `final.pt` | pilot 中按验证挑出的检查点在测试集上更差；去噪 loss 和成功率的相关性本来就弱 |
@@ -194,3 +196,4 @@
 1. **控制模式改用 ee-delta**：PickCube、StackCube、PushCube、PullCube 用 `pd_ee_delta_pos`，PegInsertionSide、PlugCharger 用 `pd_ee_delta_pose`。这与 pilot 用的 `pd_joint_pos` 不同；某个任务的转换成功率低于 90% 时退回 `pd_joint_pos`（§2.3）。
 2. **MLP 加宽到 3.5M**，与 UNet、Transformer 的参数量在同一量级；不另外跑 VariDP 原来的小 MLP。
 3. **全组统一种子和检查点口径**：测试种子 10000–10099（100 回合），报告只用 `final.pt`；VariDP 那边相应修改。
+4. **训练步数六个任务统一为 100k**（原先按官方值，四个任务是 30k）。代价是这四个任务的训练时间变为约 3.3 倍；N=25 时每条示范要被看过上万遍，可能过拟合。要在训练到 1/3、2/3 和结束时的验证 rollout 上检查成功率有没有后期下降，如果有，就在报告里如实写明，不改变口径。
