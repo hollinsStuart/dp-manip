@@ -38,6 +38,7 @@ def parse_args(args=None):
     parser.add_argument("--traj-name", type=str, help="The name of the trajectory .h5 file that will be created.")
     parser.add_argument("--shader", default="default", type=str, help="Change shader used for rendering. Default is 'default' which is very fast. Can also be 'rt' for ray tracing and generating photo-realistic renders. Can also be 'rt-fast' for a faster but lower quality ray-traced renderer")
     parser.add_argument("--record-dir", type=str, default="demos", help="where to save the recorded trajectories")
+    parser.add_argument("--start-seed", type=int, default=0, help="First environment seed to try; later seeds follow consecutively. With --num-procs, process i starts at start_seed + i * num_traj.")
     parser.add_argument("--num-procs", type=int, default=1, help="Number of processes to use to help parallelize the trajectory replay process. This uses CPU multiprocessing and only works with the CPU simulation backend at the moment.")
     return parser.parse_args()
 
@@ -130,7 +131,7 @@ def main(args):
         if args.num_traj < args.num_procs:
             raise ValueError("Number of trajectories should be greater than or equal to number of processes")
         args.num_traj = args.num_traj // args.num_procs
-        seeds = [*range(0, args.num_procs * args.num_traj, args.num_traj)]
+        seeds = [*range(args.start_seed, args.start_seed + args.num_procs * args.num_traj, args.num_traj)]
         pool = mp.Pool(args.num_procs)
         proc_args = [(deepcopy(args), i, seeds[i]) for i in range(args.num_procs)]
         res = pool.starmap(_main, proc_args)
@@ -145,7 +146,7 @@ def main(args):
             tqdm.write(f"Remove {json_path}")
             os.remove(json_path)
     else:
-        _main(args)
+        _main(args, start_seed=args.start_seed)
 
 if __name__ == "__main__":
     # start = time.time()
