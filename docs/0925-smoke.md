@@ -110,6 +110,8 @@ traj_i/actions, success, terminated, truncated, env_states
 
 随后把导出改成官方的命名和 JSON（导出到 `data/smoke0925c/`）：HDF5 与 `data/smoke0925b/` 逐位相同，只改文件名、目录和 JSON。JSON 的顶层字段（`episodes`、`env_info`、`commit_info`）、每条示范的 6 个字段及其顺序与官方相同；`env_info` 取 state 转换的，`obs_mode` 为 `state`，与 `traj_N/obs` 一致。其余信息移到 `.export_info.json`。仍然不同的只有取值：`env_kwargs` 是 ManiSkill 3.0.1 实际写出的（`sensor_configs`、`sim_backend: physx_cpu`、`reset_kwargs.options: null`），官方是更早版本写的（`shader_dir`、`sim_backend: cpu`、`options: {}`），含义相同，没有改；官方 JSON 的 CRLF 换行来自队友的 Windows，也没有模仿。
 
+导出图像改用 h5py 的自动分块（ManiSkill RecordEpisode 的写法，gzip 5 不变）：原先每帧一块只压缩到 1.4–1.8 倍，同一批 12 个文件从 419 MB 降到 196 MB（单相机任务降到 14–17%，双相机 52–61%），内容逐位相同；按此估算完整数据集（每任务 400 + 50 条）的导出约 6.5 GB。`data/smoke0925c/` 是改之前导出的，内容相同、体积大一倍。
+
 在 wsl 上用 VariDP 自己的工具验证新布局：`scripts/check_datasets.py --demo-dir data/smoke0925c/train` 扫到 6 个数据集，`obs_mode` 全为 `state`，维度、条数、长度、动作范围正确；`dp_lib.find_dataset` 自动找到 4 个 4 维任务（7 维任务要 `--h5`，因为它只找 `pd_ee_delta_pos` 后缀，官方数据同样如此）。`make_template_tasks.py` 为 PlugCharger 生成的配置，除数据路径外与队友基于官方数据写的 `task_06` 完全相同（`obs_dim 46`、动作 7、`pd_ee_delta_pose`、200 步）。`check_rgb_obs.py` 在新文件上 24 个首帧全部一致。
 
 ## 四、ManiSkill 3.0.1 的数据问题（已处理）

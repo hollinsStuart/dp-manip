@@ -268,8 +268,9 @@ def write_episode(out: h5py.File, index: int, rgb: h5py.Group, arrays: dict) -> 
     group = out.create_group(f"traj_{index}", track_order=True)
     group.create_dataset("obs", data=obs)
     rgb_group = group.create_group("obs_rgb", track_order=True)
-    rgb_group.create_dataset("rgb", data=images, chunks=(1, *images.shape[1:]),
-                             compression="gzip", compression_opts=5)
+    # h5py's automatic chunks and gzip 5, as ManiSkill's RecordEpisode writes rgb: images
+    # are 98-99% of a file, and one chunk per frame compressed only 1.8x instead of 3x.
+    rgb_group.create_dataset("rgb", data=images, compression="gzip", compression_opts=5)
     rgb_group.create_dataset("state", data=proprio)
     group.create_dataset("actions", data=actions)
     for key in ("success", "terminated", "truncated"):
@@ -346,7 +347,7 @@ def main() -> None:
     assert not missing_sidecars, f"run scripts/first_frame_obs.py first; missing {missing_sidecars}"
     handles = {path: h5py.File(path, "r") for path in {*args.rgb, *args.state, *sidecars.values()}}
 
-    def groups(item: dict) -> tuple:
+    def groups(item: dict) -> tuple[h5py.Group, h5py.Group, h5py.Group, h5py.Group]:
         rgb, state = item["rgb"], item["state"]
         return (handles[rgb["path"]][rgb["name"]], handles[state["path"]][state["name"]],
                 handles[sidecars[rgb["path"]]][rgb["name"]], handles[sidecars[state["path"]]][state["name"]])
