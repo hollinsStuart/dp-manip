@@ -2,7 +2,7 @@
 """Offline checks of the DP pipeline (no simulator needed).
 
 1. demos load with JSON episode ids and match the config's task;
-2. training windows equal a direct index computation, including padding;
+2. training windows (and the sampler's batches) equal a direct index computation, including padding;
 3. action normalization maps data into [-1, 1] and round-trips;
 4. one training step gives a finite loss, finite grads and changes parameters;
 5. sampling returns (B, act_horizon, act_dim) inside the demo action range;
@@ -34,13 +34,14 @@ def expected_window(ep, t: int, oh: int, ph: int, delta: bool):
     """Direct (unvectorized) definition of the window whose current step is t."""
     T = ep.actions.shape[0]
     obs = np.stack([ep.obs[max(i, 0)] for i in range(t - oh + 1, t + 1)])
+    images = None if ep.images is None else np.stack([ep.images[max(i, 0)] for i in range(t - oh + 1, t + 1)])
     still = ep.actions[-1].copy()
     if delta:
         still[:-1] = 0
     acts = []
     for i in range(t - oh + 1, t - oh + 1 + ph):
         acts.append(ep.actions[0] if i < 0 else ep.actions[i] if i < T else still)
-    return obs, np.stack(acts)
+    return obs, np.stack(acts), images
 
 
 def main() -> None:
@@ -55,26 +56,31 @@ def main() -> None:
     cfg = config_lib.load(args.config, args.overrides)
     p = cfg.policy
 
-    demos = load_demos(root / cfg.data.demo_path, cfg.data.num_demos)
+    demos = load_demos(root / cfg.data.demo_path, cfg.data.num_demos, obs_mode=cfg.task.obs_mode)
     assert (demos.env_id, demos.control_mode, demos.obs_mode) == \
         (cfg.task.env_id, cfg.task.control_mode, cfg.task.obs_mode), "dataset/config mismatch"
     assert not set(demos.seeds) & (set(cfg.val_seeds()) | set(cfg.test_seeds())), "eval seeds overlap demos"
     lengths = [e.actions.shape[0] for e in demos.episodes]
     print(f"[1] {len(demos.episodes)} demos, seeds {demos.seeds}, lengths {lengths} "
-          f"(total {sum(lengths)}), obs_dim {demos.obs_dim}, act_dim {demos.act_dim}")
+          f"(total {sum(lengths)}), obs_dim {demos.obs_dim}, act_dim {demos.act_dim}, "
+          f"images {demos.image_shape}")
 
-    obs_w, act_w = build_windows(demos, p.obs_horizon, p.pred_horizon)
-    assert obs_w.shape == (sum(lengths), p.obs_horizon, demos.obs_dim)
+    idx_w, act_w = build_windows(demos, p.obs_horizon, p.pred_horizon)
+    assert idx_w.shape == (sum(lengths), p.obs_horizon)
     assert act_w.shape == (sum(lengths), p.pred_horizon, demos.act_dim)
+    frames = np.concatenate([e.obs for e in demos.episodes])
+    images = None if demos.image_shape is None else np.concatenate([e.images for e in demos.episodes])
     delta = is_delta_control(demos.control_mode)
     k = 0
     for ep in demos.episodes:
         for t in range(ep.actions.shape[0]):
-            o, a = expected_window(ep, t, p.obs_horizon, p.pred_horizon, delta)
-            assert np.array_equal(obs_w[k], o) and np.array_equal(act_w[k], a), (ep.episode_id, t)
+            o, a, img = expected_window(ep, t, p.obs_horizon, p.pred_horizon, delta)
+            assert np.array_equal(frames[idx_w[k]], o) and np.array_equal(act_w[k], a), (ep.episode_id, t)
+            assert images is None or np.array_equal(images[idx_w[k]], img), (ep.episode_id, t)
             k += 1
-    print(f"[2] {k} windows match direct indexing (obs {obs_w.shape[1:]}, actions {act_w.shape[1:]}, "
-          f"end padding {'zero-delta' if delta else 'repeat last'})")
+    print(f"[2] {k} windows match direct indexing (obs {(p.obs_horizon, demos.obs_dim)}, "
+          f"actions {act_w.shape[1:]}, end padding {'zero-delta' if delta else 'repeat last'}"
+          f"{'' if images is None else ', images too'})")
 
     norm = ActionNormalizer.fit(demos)
     n = norm.normalize(act_w)
@@ -89,7 +95,12 @@ def main() -> None:
           f"[{n.min():.3f}, {n.max():.3f}], round-trip error {max(err, t_err):.1e}")
 
     sampler = WindowSampler(demos, norm, p.obs_horizon, p.pred_horizon, device)
-    policy = DiffusionPolicy(p, demos.obs_dim, demos.act_dim, norm).to(device)
+    policy = DiffusionPolicy(p, demos.obs_dim, demos.act_dim, norm, image_shape=demos.image_shape).to(device)
+    obs_all, act_all = sampler.window(torch.arange(len(sampler), device=device))
+    assert torch.equal(obs_all["state"].cpu(), torch.from_numpy(frames[idx_w]))
+    assert torch.allclose(act_all.cpu(), torch.from_numpy(norm.normalize(act_w)))
+    assert images is None or torch.equal(obs_all["rgb"][:64].cpu(), torch.from_numpy(images[idx_w[:64]]))
+    del obs_all, act_all
     before = copy.deepcopy(policy.state_dict())
     opt = torch.optim.AdamW(policy.parameters(), lr=1e-4)
     obs_b, act_b = sampler.sample(32, torch.Generator().manual_seed(0))
@@ -100,11 +111,12 @@ def main() -> None:
     opt.step()
     changed = sum(not torch.equal(before[name], v) for name, v in policy.state_dict().items())
     assert torch.isfinite(loss) and grads_finite and changed > 0
-    print(f"[4] {num_params(policy.noise_pred_net) / 1e6:.2f}M params, loss {loss.item():.4f}, "
+    print(f"[4] {num_params(policy.noise_pred_net) / 1e6:.2f}M UNet + {num_params(policy.obs_encoder) / 1e6:.2f}M "
+          f"encoder params, loss {loss.item():.4f}, "
           f"grads finite, {changed} tensors updated")
 
     policy.eval()
-    actions = policy.get_action(obs_b[:4])
+    actions = policy.get_action({k: v[:4] for k, v in obs_b.items()})
     assert actions.shape == (4, p.act_horizon, demos.act_dim), actions.shape
     lo, hi = torch.as_tensor(norm.low, device=device), torch.as_tensor(norm.high, device=device)
     assert torch.isfinite(actions).all() and (actions >= lo - 1e-4).all() and (actions <= hi + 1e-4).all()

@@ -44,8 +44,7 @@ def evaluate(policy, envs, seeds: Sequence[int], device: torch.device) -> dict:
         done = False
         while not done:
             tick = time.time()
-            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
-            actions = policy.get_action(obs_t).cpu().numpy()
+            actions = policy.get_action(obs_to_torch(obs, device)).cpu().numpy()
             infer_time += time.time() - tick
             infer_calls += 1
             for j in range(actions.shape[1]):
@@ -67,6 +66,16 @@ def evaluate(policy, envs, seeds: Sequence[int], device: torch.device) -> dict:
         mean_inference_ms=1000 * infer_time / max(infer_calls, 1),
     )
     return {"summary": summary, "episodes": episodes}
+
+
+def obs_to_torch(obs, device: torch.device) -> dict[str, torch.Tensor]:
+    """Vector-env observations -> the policy's dict (state arrays become {"state": ...}).
+
+    Images stay uint8; the encoder converts them on the device.
+    """
+    if not isinstance(obs, dict):
+        obs = {"state": obs}
+    return {k: torch.as_tensor(np.asarray(v), device=device) for k, v in obs.items()}
 
 
 def _scalar(x):

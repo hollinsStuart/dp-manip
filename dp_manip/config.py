@@ -18,6 +18,8 @@ from typing import Any, Sequence
 class TaskConfig:
     env_id: str
     control_mode: str
+    # "state": traj_i/obs (privileged state vector); "rgb": traj_i/obs_rgb (camera
+    # images + agent state) of scripts/export_demos.py, evaluated on an obs_mode="rgb" env.
     obs_mode: str = "state"
     sim_backend: str = "physx_cpu"
     # Evaluation episode length. ManiSkill defaults are tuned for RL and can be
@@ -41,6 +43,8 @@ class PolicyConfig:
     unet_dims: list[int] = field(default_factory=lambda: [64, 128, 256])
     n_groups: int = 8
     num_diffusion_iters: int = 100
+    # rgb only: PlainConv feature width per frame (train_rgbd.py uses 256).
+    visual_feature_dim: int = 256
 
 
 @dataclass
@@ -79,6 +83,8 @@ class Config:
     eval: EvalConfig = field(default_factory=EvalConfig)
 
     def validate(self) -> None:
+        if self.task.obs_mode not in ("state", "rgb"):
+            raise ValueError(f"task.obs_mode must be 'state' or 'rgb', got {self.task.obs_mode!r}")
         p = self.policy
         if min(p.obs_horizon, p.act_horizon, p.pred_horizon) < 1:
             raise ValueError("horizons must be positive")

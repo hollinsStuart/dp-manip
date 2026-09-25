@@ -4,7 +4,10 @@ Adapted from ManiSkill examples/baselines/diffusion_policy/diffusion_policy/make
 (haosulab/ManiSkill@62ff3a5, Apache-2.0), CPU branch only, for mani-skill 3.0.1:
 - rendering is disabled (render_backend="none") unless a video directory is given,
   so state-only evaluation does not need a working Vulkan device;
-- RecordEpisode in 3.0.1 has no source_type/source_desc arguments.
+- RecordEpisode in 3.0.1 has no source_type/source_desc arguments;
+- rgb observations use the cameras of the demo conversion (render_backend "cpu",
+  sensor shader "minimal", see the rgb_env_info of export_demos.py outputs) and
+  FlattenRGBDObservationWrapper(rgb=True, depth=False) as train_rgbd.py does.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ def ensure_render_icd() -> None:
 
 
 def env_kwargs(cfg: Config, render: bool = False) -> dict[str, Any]:
+    rgb = cfg.task.obs_mode == "rgb"
     kwargs: dict[str, Any] = dict(
         obs_mode=cfg.task.obs_mode,
         control_mode=cfg.task.control_mode,
@@ -46,17 +50,22 @@ def env_kwargs(cfg: Config, render: bool = False) -> dict[str, Any]:
         sim_backend=cfg.task.sim_backend,
         max_episode_steps=cfg.task.max_episode_steps,
     )
+    if rgb:
+        kwargs.update(render_backend="cpu", sensor_configs=dict(shader_pack="minimal"))
     if render:
         kwargs.update(render_mode="rgb_array", render_backend="cpu",
                       human_render_camera_configs=dict(shader_pack="default"))
-    else:
+    elif not rgb:
         kwargs.update(render_backend="none")
     return kwargs
 
 
 def make_eval_envs(cfg: Config, num_envs: int, video_dir: str | None = None,
                    states_dir: str | None = None):
-    """Vector env whose observations are stacked to (obs_horizon, obs_dim) per env.
+    """Vector env whose observations are stacked to (obs_horizon, ...) per env.
+
+    state: an array (obs_horizon, obs_dim); rgb: a dict with "state"
+    (obs_horizon, P) and "rgb" (obs_horizon, H, W, 3*C) uint8.
 
     Episodes never terminate early (ignore_terminations) and all run for
     max_episode_steps, so every sub-env truncates on the same step. Only the
@@ -67,10 +76,12 @@ def make_eval_envs(cfg: Config, num_envs: int, video_dir: str | None = None,
     """
     if cfg.task.sim_backend != "physx_cpu":
         raise NotImplementedError("only physx_cpu evaluation is wired up")
-    if video_dir is not None:
+    rgb = cfg.task.obs_mode == "rgb"
+    if video_dir is not None or rgb:
         ensure_render_icd()
     import mani_skill.envs  # noqa: F401  (registers env ids)
     from mani_skill.utils.wrappers import CPUGymWrapper, FrameStack, RecordEpisode
+    from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper
 
     obs_horizon = cfg.policy.obs_horizon
 
@@ -79,6 +90,8 @@ def make_eval_envs(cfg: Config, num_envs: int, video_dir: str | None = None,
 
         def thunk():
             env = gym.make(cfg.task.env_id, reconfiguration_freq=1, **env_kwargs(cfg, render=record))
+            if rgb:
+                env = FlattenRGBDObservationWrapper(env, rgb=True, depth=False, state=True)
             env = FrameStack(env, num_stack=obs_horizon)
             env = CPUGymWrapper(env, ignore_terminations=True, record_metrics=True)
             if states_dir is not None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a state-based Diffusion Policy on ManiSkill demos and evaluate it on held-out seeds.
+"""Train a Diffusion Policy (state or rgb observations) on ManiSkill demos and evaluate it on held-out seeds.
 
 Training loop follows ManiSkill's DP baseline (AdamW, cosine LR with warmup,
 EMA weights used for evaluation). Outputs:
@@ -77,7 +77,7 @@ def main() -> None:
     generator = seed_everything(cfg.train.seed)
 
     # Data and consistency checks between the dataset, config and eval seeds.
-    demos = load_demos(root / cfg.data.demo_path, cfg.data.num_demos)
+    demos = load_demos(root / cfg.data.demo_path, cfg.data.num_demos, obs_mode=cfg.task.obs_mode)
     for name, have, want in [("env_id", demos.env_id, cfg.task.env_id),
                              ("control_mode", demos.control_mode, cfg.task.control_mode),
                              ("obs_mode", demos.obs_mode, cfg.task.obs_mode)]:
@@ -93,7 +93,8 @@ def main() -> None:
     normalizer = ActionNormalizer.fit(demos)
     sampler = WindowSampler(demos, normalizer, cfg.policy.obs_horizon, cfg.policy.pred_horizon, device)
 
-    policy = DiffusionPolicy(cfg.policy, demos.obs_dim, demos.act_dim, normalizer).to(device)
+    policy = DiffusionPolicy(cfg.policy, demos.obs_dim, demos.act_dim, normalizer,
+                             image_shape=demos.image_shape).to(device)
     ema_policy = copy.deepcopy(policy)
 
     from diffusers.optimization import get_scheduler
@@ -115,7 +116,10 @@ def main() -> None:
         "num_transitions": int(sum(e.actions.shape[0] for e in demos.episodes)),
         "obs_dim": demos.obs_dim,
         "act_dim": demos.act_dim,
+        "image_shape": demos.image_shape,
         "num_params": num_params(policy.noise_pred_net),
+        "num_params_obs_encoder": num_params(policy.obs_encoder),
+        "image_mem_mb": sampler.image_bytes / 2**20,
         "normalizer": normalizer.state_dict(),
         "device": str(device),
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
@@ -124,8 +128,11 @@ def main() -> None:
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     (result_dir / "config.json").write_text(json.dumps(run_info, indent=2))
+    images = (f", images {demos.image_shape} ({run_info['image_mem_mb']:.0f} MiB on {device}), "
+              f"encoder {run_info['num_params_obs_encoder'] / 1e6:.2f}M params" if demos.image_shape else "")
     print(f"{len(demos.episodes)} demos, {run_info['num_transitions']} transitions, "
-          f"{len(sampler)} windows, {run_info['num_params'] / 1e6:.2f}M params, device {device}")
+          f"{len(sampler)} windows, obs {demos.obs_dim}, act {demos.act_dim}{images}, "
+          f"{run_info['num_params'] / 1e6:.2f}M UNet params, device {device}")
 
     envs = None
     if not args.no_eval:

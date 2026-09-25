@@ -28,7 +28,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dp_manip.data import load_demos  # noqa: E402
+from dp_manip.data import demo_seeds  # noqa: E402
 from dp_manip.envs import make_eval_envs  # noqa: E402
 from dp_manip.evaluate import evaluate  # noqa: E402
 from dp_manip.policy import load_checkpoint  # noqa: E402
@@ -55,7 +55,7 @@ def main() -> None:
     policy, cfg, ckpt = load_checkpoint(args.checkpoint, device)
     root = Path(__file__).resolve().parents[1]
     if args.split == "train":
-        seeds = load_demos(root / cfg.data.demo_path, cfg.data.num_demos).seeds
+        seeds = demo_seeds(root / cfg.data.demo_path, cfg.data.num_demos)
     else:
         seeds = cfg.test_seeds() if args.split == "test" else cfg.val_seeds()
     seeds = seeds[: args.episodes] if args.episodes else seeds

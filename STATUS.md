@@ -1,6 +1,6 @@
 # dp-manip 当前状态
 
-**最后更新：9.24 00:40（PickCube 数据量消融 × 3 个训练种子）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
+**最后更新：9.26（dp_manip 支持 RGB 训练）** ｜ 未完成事项见 [TODO.md](./TODO.md) ｜ Day 1 原始记录见 [docs/history.md](./docs/history.md)
 
 > 本文件由 Mac 原 `progress.md` 与 wsl 原 `STATUS.md` 合并而成（9.23）。
 
@@ -14,6 +14,8 @@
 - **PickCube 基线（9.23 21:55–22:41）**：100 条示范，测试成功率（success_once，100 回合）best.pt 0.67、final.pt 0.77；数据量消融 10 / 25 / 50 / 100 条 → final 0.02 / 0.14 / 0.47 / 0.77。完整记录与耗时见 [docs/0923-2155.md](./docs/0923-2155.md)。**报告口径（9.23 决定）：主结果固定用 final.pt，不按验证挑选**（50 回合验证选出的 best.pt 在 100 条时比 final.pt 低 10 个百分点）。按此口径，PickCube 基线 = **0.77**。
 - **补训练种子 2、3（9.23 22:49 – 9.24 00:40）**：数据量消融 10 / 25 / 50 / 100 条，3 个训练种子平均 **0.02 / 0.13 / 0.56 / 0.67**（范围 0.02–0.03 / 0.09–0.15 / 0.42–0.79 / 0.53–0.77）。**PickCube 基线按 3 个种子平均 = 0.67**（上一条的 0.77 只是种子 1）。训练种子间的波动（50 条标准差 0.20）远大于评估噪声（约 0.05），50 条与 100 条的差距暂不能下结论。完整记录见 [docs/0923-2249.md](./docs/0923-2249.md)。
 - **Mac**：9.23 起成为唯一权威 git 仓库，代码、配置、文档都从 ubuntu 和 wsl 汇总到这里（见 [PLAN.md](./PLAN.md)）。
+
+- **RGB 训练（9.26）**：`dp_manip` 支持 `obs_mode = "rgb"`（PlainConv + agent state，照官方 `train_rgbd.py`），六个任务的配置在 `configs/rgb/`（前四个 4 维 `pd_ee_delta_pos`，PegInsertionSide、PlugCharger 8 维 `pd_joint_pos`）。在 Mac 上用 `data/smoke0925c` 验证：3 通道和 6 通道都通过离线检查；StackCube 训练 500 步，loss 从 1.22 降到 0.11；评估环境首帧与示范一致（state 差 < 1e-6，像素差 ≤ 2）。wsl 上还没跑。
 
 尚未进行：其余五个任务的正式数据收集（9.24 各只试跑了 1 条，见「其余五个任务试跑」）、专家生成过程的录像（策略 rollout 录像已在 wsl 打通）、控制模式转换。
 

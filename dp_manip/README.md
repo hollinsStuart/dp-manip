@@ -1,6 +1,7 @@
 # dp_manip
 
-State-based Diffusion Policy training and evaluation for ManiSkill 3.0.1 tasks.
+Diffusion Policy training and evaluation for ManiSkill 3.0.1 tasks, from state or RGB observations
+(`task.obs_mode = "state"` / `"rgb"`).
 
 ## Provenance
 
@@ -13,7 +14,8 @@ Diffusion Policy by Chi et al. ([paper](https://arxiv.org/abs/2303.04137),
 | File | Relation to the baseline |
 | --- | --- |
 | `conditional_unet1d.py` | copied unchanged |
-| `policy.py` | `Agent` from `train.py`: same UNet / DDPM (100 steps, squaredcos_cap_v2, epsilon, clip) |
+| `policy.py` | `Agent` from `train.py` / `train_rgbd.py`: same UNet / DDPM (100 steps, squaredcos_cap_v2, epsilon, clip) |
+| `obs_encoder.py` | `PlainConv` copied from `diffusion_policy/plain_conv.py`; `ObsEncoder` follows `Agent.encode_obs` of `train_rgbd.py` |
 | `envs.py` | CPU branch of `make_env.py`, adapted to 3.0.1 |
 | `data.py`, `evaluate.py`, `config.py`, `scripts/train_dp.py`, `scripts/eval_dp.py` | rewritten |
 
@@ -36,7 +38,27 @@ Diffusion Policy by Chi et al. ([paper](https://arxiv.org/abs/2303.04137),
 6. **No rendering during evaluation** unless videos are requested, so state-only
    evaluation does not need Vulkan.
 7. **Logging** to JSON files under `results/<exp>/` instead of TensorBoard / W&B.
+8. **One agent for state and rgb.** Observations are dicts (`{"state"}` or
+   `{"state", "rgb"}`) that `ObsEncoder` turns into the UNet's conditioning vector:
+   a plain flatten for state (no parameters, so state checkpoints are unchanged),
+   PlainConv (256-d per frame, all cameras stacked on channels) + state for rgb.
+   Images stay channel-last uint8 until the encoder, in the demos and the env alike.
+9. **Frames stored once.** Training windows hold frame indices instead of copies,
+   so images (uint8) are kept on the GPU once: 400 PegInsertionSide demos are about
+   8 GB. The baseline also keeps rgb uint8 on the GPU, per episode.
+10. **RGB eval cameras match the demo conversion**: `render_backend="cpu"` and the
+   `minimal` sensor shader (`rgb_env_info` of the export), then
+   `FlattenRGBDObservationWrapper(rgb=True, depth=False)` and `FrameStack`.
 
-Unchanged on purpose: observations are not normalized; EMA is created as
+## Where RGB evaluation runs
+
+Rendering after a scene reconfiguration (`reconfiguration_freq=1`, every reset) is
+correct on Linux with the NVIDIA driver and with Mesa lavapipe (ubuntu, 9.26: identical
+images with and without reconfiguration). On the Mac, MoltenVK renders every frame
+after a reconfiguration green-washed, and fails to compile shaders in
+`AsyncVectorEnv` workers, so the Mac cannot evaluate rgb policies (training works, on MPS).
+
+Unchanged on purpose: observations are not normalized and images are not
+augmented (train_rgbd.py defines no augmentation); EMA is created as
 `EMAModel(power=0.75)` exactly as in the baseline (diffusers ignores `power`
 without `use_ema_warmup=True`).

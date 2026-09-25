@@ -7,6 +7,9 @@ with its seed, compare the first observation with the stored one, execute the
 stored actions and record success. If this does not reach (near) 100%, the
 policy cannot be evaluated fairly in this env and the mismatch must be fixed first.
 
+rgb configs are replayed with obs_mode="state" against traj_i/obs: same env and
+control mode, no rendering. Camera images are compared by scripts/smoke/check_rgb_obs.py.
+
 Example (wsl):
   .venv/bin/python scripts/replay_check.py --config configs/pickcube_state_jointpos.toml
 """
@@ -40,6 +43,7 @@ def main() -> None:
     import mani_skill.envs  # noqa: F401
 
     cfg = config_lib.load(args.config, args.overrides)
+    cfg.task.obs_mode = "state"
     root = Path(__file__).resolve().parents[1]
     demos = load_demos(root / cfg.data.demo_path, cfg.data.num_demos)
     env = gym.make(cfg.task.env_id, **env_kwargs(cfg))
