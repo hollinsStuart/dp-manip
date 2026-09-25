@@ -38,7 +38,19 @@ an episode shows a joint jump no controller step can make.
 Frame 0 (observations, image and env state) comes from the ``<replay stem>.first_obs.h5``
 sidecar that scripts/first_frame_obs.py writes next to every input: 3.0.1 records stale
 contacts in the first observation (PickCube ``is_grasped``) and the source's t=1 state
-as ``env_states[0]``. What changed is listed per episode under ``dp_manip.first_frame_fix``.
+as ``env_states[0]``. What changed is listed per episode under ``first_frame_fix``.
+
+Files are named and laid out like the official demos, one directory tree per split::
+
+    <root>/train/<env>/motionplanning/trajectory.state.<mode>.physx_cpu.h5
+    <root>/train/<env>/motionplanning/trajectory.state.<mode>.physx_cpu.json              (official fields)
+    <root>/train/<env>/motionplanning/trajectory.state.<mode>.physx_cpu.export_info.json  (this export)
+
+so VariDP finds ``<root>/train`` with ``--demo-dir`` like ``~/.maniskill/demos``. The
+``.json`` holds only ``episodes``, ``env_info`` (of the state conversion: obs_mode state,
+matching ``traj_i/obs``) and ``commit_info``, with the six official episode fields.
+Dimensions, layouts, seeds, rejected episodes, frame-0 fixes, per-episode sources, the
+rgb env_info and hashes are in ``.export_info.json``.
 """
 
 import argparse
@@ -175,6 +187,10 @@ def compare_env_states(rgb: h5py.Group, state: h5py.Group, where: str) -> float:
     return worst
 
 
+def info_path(output: Path) -> Path:
+    return output.with_name(output.stem + ".export_info.json")
+
+
 def sidecar_path(path: Path) -> Path:
     return path.with_name(path.stem + ".first_obs.h5")
 
@@ -299,7 +315,9 @@ def main() -> None:
                         help="rgb replay H5 files (JSON alongside), e.g. *.rgb.pd_ee_delta_pos.physx_cpu.h5")
     parser.add_argument("--state", nargs="+", type=Path, required=True,
                         help="state conversions (-o state) of the same raw demos; paired by seed")
-    parser.add_argument("-o", "--output", type=Path, required=True, help="output .h5 path; a .json is written beside it")
+    parser.add_argument("-o", "--output", type=Path, required=True,
+                        help="output .h5, e.g. <root>/train/<env>/motionplanning/trajectory.state.<mode>.physx_cpu.h5; "
+                             "writes <output>.json (official layout) and <output stem>.export_info.json")
     parser.add_argument("--split", choices=sorted(SEED_RANGES), required=True,
                         help="train = pool seeds 0-3999, val = validation demo seeds 4000-4999")
     parser.add_argument("--num-demos", type=int,
@@ -307,7 +325,7 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true", help="replace an existing output file")
     args = parser.parse_args()
 
-    for path in (args.output, args.output.with_suffix(".json")):
+    for path in (args.output, args.output.with_suffix(".json"), info_path(args.output)):
         assert args.overwrite or not path.exists(), f"{path} exists; pass --overwrite to replace it"
 
     env_info, rgb_episodes = merge_index(args.rgb, "rgb")
@@ -374,49 +392,55 @@ def main() -> None:
             handle.close()
     temporary.replace(args.output)
 
-    lengths = [s["length"] for s in stats]
+    # <output>.json has exactly the fields and layout of an official ManiSkill replay JSON
+    # (episodes, env_info, commit_info). env_info is the state conversion's, since traj_i/obs
+    # is state; everything specific to this export goes to <output stem>.export_info.json.
     episodes = []
     for index, item in enumerate(selected):
-        record = dict(item["rgb"]["meta"])
+        record = dict(item["state"]["meta"])
         record["episode_id"] = index
-        record.update(source_rgb_file=item["rgb"]["path"].name, source_rgb_episode_id=item["rgb"]["meta"]["episode_id"],
-                      source_state_file=item["state"]["path"].name, source_state_episode_id=item["state"]["meta"]["episode_id"])
         episodes.append(record)
-    meta = {
-        # env_info is the rgb conversion's, so re-creating the env reproduces obs_rgb; traj_i/obs
-        # comes from the state conversion, whose env_info is kept under dp_manip.state_env_info.
-        "env_info": env_info,
-        "dp_manip": {
-            "layout": "traj_i/obs = obs_mode state; traj_i/obs_rgb/{rgb,state} = FlattenRGBDObservationWrapper(rgb=True, depth=False) of obs_mode rgb",
-            "split": args.split,
-            "num_demos": len(selected),
-            "total_steps": int(sum(lengths)),
-            "length_min_median_max": [min(lengths), int(np.median(lengths)), max(lengths)],
-            "control_mode": control_mode,
-            "action_dim": stats[0]["action_dim"],
-            "obs_dim": stats[0]["obs_dim"],
-            "obs_rgb_state_dim": sum(width for _, width in stats[0]["proprio_layout"]),
-            "obs_rgb_state_layout": stats[0]["proprio_layout"],
-            "obs_rgb_image_shape": stats[0]["image_shape"],
-            "cameras": stats[0]["cameras"],
-            "env_state_max_diff": max(s["env_state_max_diff"] for s in stats),
-            "seeds": seeds,
-            "rejected": rejected,
-            "first_frame_fix": {
-                "episodes_changed": sum(bool(s["fix"]["obs_cols"] or s["fix"]["obs_rgb_state_keys"]
-                                             or s["fix"]["image_max_change"]) for s in stats),
-                "env_state0_max_change": max(s["fix"]["env_state0_max_change"] for s in stats),
-                "episodes": [s["fix"] for s in stats],
-            },
-            "sources": {path.name: sha256(path) for path in [*args.rgb, *args.state, *sidecars.values()]},
-            "state_env_info": state_info,
-            "sha256": sha256(args.output),
-        },
-        "episodes": episodes,
-    }
-    args.output.with_suffix(".json").write_text(json.dumps(meta, indent=1) + "\n", encoding="utf-8")
+    commit_info = json.loads(args.state[0].with_suffix(".json").read_text(encoding="utf-8")).get("commit_info")
+    official = {"episodes": episodes, "env_info": state_info, "commit_info": commit_info}
+    args.output.with_suffix(".json").write_text(json.dumps(official, indent=2) + "\n", encoding="utf-8")
 
-    summary = meta["dp_manip"]
+    lengths = [s["length"] for s in stats]
+    info = {
+        "layout": "traj_i/obs = obs_mode state; traj_i/obs_rgb/{rgb,state} = "
+                  "FlattenRGBDObservationWrapper(rgb=True, depth=False) of obs_mode rgb",
+        "split": args.split,
+        "num_demos": len(selected),
+        "total_steps": int(sum(lengths)),
+        "length_min_median_max": [min(lengths), int(np.median(lengths)), max(lengths)],
+        "control_mode": control_mode,
+        "action_dim": stats[0]["action_dim"],
+        "obs_dim": stats[0]["obs_dim"],
+        "obs_rgb_state_dim": sum(width for _, width in stats[0]["proprio_layout"]),
+        "obs_rgb_state_layout": stats[0]["proprio_layout"],
+        "obs_rgb_image_shape": stats[0]["image_shape"],
+        "cameras": stats[0]["cameras"],
+        "env_state_max_diff": max(s["env_state_max_diff"] for s in stats),
+        "seeds": seeds,
+        "rejected": rejected,
+        "first_frame_fix": {
+            "episodes_changed": sum(bool(s["fix"]["obs_cols"] or s["fix"]["obs_rgb_state_keys"]
+                                         or s["fix"]["image_max_change"]) for s in stats),
+            "env_state0_max_change": max(s["fix"]["env_state0_max_change"] for s in stats),
+            "episodes": [s["fix"] for s in stats],
+        },
+        "episode_sources": [
+            {"episode_id": index, "seed": item["seed"],
+             "rgb_file": item["rgb"]["path"].name, "rgb_episode_id": item["rgb"]["meta"]["episode_id"],
+             "state_file": item["state"]["path"].name, "state_episode_id": item["state"]["meta"]["episode_id"]}
+            for index, item in enumerate(selected)],
+        # Re-creating this env reproduces obs_rgb (camera and shader settings).
+        "rgb_env_info": env_info,
+        "sources": {path.name: sha256(path) for path in [*args.rgb, *args.state, *sidecars.values()]},
+        "sha256": sha256(args.output),
+    }
+    info_path(args.output).write_text(json.dumps(info, indent=1) + "\n", encoding="utf-8")
+
+    summary = info
     print(f"{args.output}: {len(selected)} demos, {summary['total_steps']} steps, seeds {seeds[0]}-{seeds[-1]}, "
           f"sha256 {summary['sha256'][:16]}")
     print(f"env {env_info['env_id']}, control mode {control_mode}, action {summary['action_dim']}; "

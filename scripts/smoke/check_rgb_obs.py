@@ -54,7 +54,7 @@ def main() -> int:
     for path in args.files:
         meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
         env_id = meta["env_info"]["env_id"]
-        control_mode = meta["dp_manip"]["control_mode"]
+        control_mode = meta["env_info"]["env_kwargs"]["control_mode"]
         kwargs = dict(control_mode=control_mode, sim_backend=args.sim_backend, num_envs=1)
         render = {"render_backend": args.render_backend} if args.render_backend else {}
         state_env = gym.make(env_id, obs_mode="state", render_backend="none", **kwargs)
@@ -70,11 +70,11 @@ def main() -> int:
                 proprio_diff = np.abs(to_numpy(rgb_obs["state"]).reshape(-1) - group["obs_rgb/state"][0]).max()
                 image = to_numpy(rgb_obs["rgb"])[0].astype(np.int16)
                 stored = group["obs_rgb/rgb"][0].astype(np.int16)
-                assert image.shape == stored.shape, f"{path.name} seed {seed}: rgb {image.shape} vs stored {stored.shape}"
+                assert image.shape == stored.shape, f"{env_id} seed {seed}: rgb {image.shape} vs stored {stored.shape}"
                 pixel = np.abs(image - stored)
                 ok = state_diff <= STATE_ATOL and proprio_diff <= STATE_ATOL
                 failures += strict and not ok
-                print(f"{path.name} seed {seed}: obs max diff {state_diff:.1e}, obs_rgb/state max diff {proprio_diff:.1e}, "
+                print(f"{env_id} seed {seed}: obs max diff {state_diff:.1e}, obs_rgb/state max diff {proprio_diff:.1e}, "
                       f"rgb mean abs {pixel.mean():.2f}, max {pixel.max()}, >8 in {(pixel > 8).mean():.2%} of values"
                       f"{'' if ok or not strict else '  MISMATCH'}")
         state_env.close()

@@ -49,7 +49,7 @@
 - [ ] 按 docs/0925-smoke.md §五 修订 final-plan：7 维任务转换成功率 60–73% 低于 90% 关卡（先用约 50 条复测）；按规则重算评估回合长度；三个任务有两路相机；全组统一评估后端。
 - [ ] 7606-train-template 的适配与验证（9.25 暂缓，先做 VariDP）。它的评估默认也用 `physx_cuda`，先单独复现 wsl 上 GPU 仿真导致 WSL 被关机的问题。
 - [ ] 给 VariDP 的建议：提交 `uv.lock`；`train.py` 支持独立验证集文件（现在从训练文件随机切 10%，前 N 条实际只训练约 0.9N）；`eval.py` 加 `--render-backend`。
-- [ ] 清理 9.25 的无效数据（需确认）：ubuntu 与 Mac 的 `demos-smoke0925/`，Mac 与 wsl 的 `data/smoke0925/`。
+- [ ] 清理 9.25 的无效或已被取代的数据（需确认）：ubuntu 与 Mac 的 `demos-smoke0925/`，Mac 与 wsl 的 `data/smoke0925/`、`data/smoke0925b/`（有效的是 `data/smoke0925c/`）。
 
 ## D. DP 基线、研究实验与交付
 

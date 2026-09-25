@@ -35,7 +35,7 @@ for task in "${tasks[@]}"; do
   [ "$task" = pickcube ] && backbones="mlp unet transformer"
   for backbone in $backbones; do
     name="smoke_${task}_$backbone"
-    step "$task $backbone: train" uv run python train/train.py --env-id "$env" --h5 "$DATA/$task/${task}_train.h5" \
+    step "$task $backbone: train" uv run python train/train.py --env-id "$env" --h5 "$(demo_file "$DATA" train "$task")" \
         --backbone "$backbone" --total-iters "$STEPS" --control-mode "$mode" --max-episode-steps "$steps" \
         --exp-name "$name" || continue
     step "$task $backbone: eval" uv run python "${EVAL[@]}" --ckpt "train/runs/$name/best.pt" \

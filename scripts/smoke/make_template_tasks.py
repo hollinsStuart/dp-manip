@@ -2,12 +2,13 @@
 """Create 7606-train-template task plugins tasks/ms_<task> for scripts/export_demos.py files.
 
 Each plugin is a verbatim copy of the template's tasks/task_06 (PlugCharger, state obs)
-with only config.py rewritten: env id, control mode, obs/action dims and paths come from
-the exported JSON, the eval episode length from the command line. Data loading, models,
-policy and environment code stay the template's own. Standard library only.
+with only config.py rewritten: env id and control mode come from the exported demo's
+JSON, obs/action dims from its .export_info.json, the eval episode length from the command
+line. Data loading, models, policy and environment code stay the template's own.
+Standard library only.
 
     make_template_tasks.py --template-dir ~/teammates/7606-train-template \\
-        --data-dir data/smoke0925 pickcube=100 stackcube=200
+        pickcube=100=data/smoke0925b/train/PickCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5
 """
 
 import argparse
@@ -22,8 +23,7 @@ SOURCE_TASK = "task_06"
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--template-dir", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True, help="holds <task>/<task>_train.{h5,json}")
-    parser.add_argument("tasks", nargs="+", help="<task>=<max_episode_steps>")
+    parser.add_argument("tasks", nargs="+", help="<task>=<max_episode_steps>=<exported training demo .h5>")
     args = parser.parse_args()
 
     tasks_dir = args.template_dir / "tasks"
@@ -32,10 +32,11 @@ def main() -> None:
     base_config = base["TASK_CONFIG"]
 
     for item in args.tasks:
-        task, steps = item.split("=")
-        dataset = (args.data_dir / task / f"{task}_train.h5").resolve()
+        task, steps, path = item.split("=", 2)
+        dataset = Path(path).resolve()
         meta = json.loads(dataset.with_suffix(".json").read_text(encoding="utf-8"))
-        summary = meta["dp_manip"]
+        summary = json.loads(dataset.with_name(dataset.stem + ".export_info.json").read_text(encoding="utf-8"))
+        assert summary["split"] == "train", f"{dataset} is a {summary['split']} file"
         config = dict(base_config)
         config.update(
             task_name=meta["env_info"]["env_id"],

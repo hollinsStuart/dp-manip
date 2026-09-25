@@ -17,6 +17,14 @@ task_info() {
   esac
 }
 
+# demo_file ROOT SPLIT TASK: exported demo path in the official layout (scripts/export_demos.py).
+demo_file() {
+  local info env mode
+  info=$(task_info "$3") || return 1
+  read -r env mode _ <<<"$info"
+  echo "$1/$2/$env/motionplanning/trajectory.state.$mode.physx_cpu.h5"
+}
+
 # step LABEL CMD...: run CMD, record OK/FAIL with the elapsed time, keep going.
 RESULTS=()
 step() {

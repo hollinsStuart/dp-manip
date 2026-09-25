@@ -2,7 +2,9 @@
 # Phase 2 (Mac): turn the replays copied from ubuntu into teammate demo files.
 #   rsync -a ubuntu:Coding/dp-manip/demos-smoke0925/ demos-smoke0925/
 #   scripts/smoke/export_data.sh [task ...]
-# Writes $DST/<task>/<task>_{train,val}.{h5,json} and a <task>_train_preview.png.
+# Writes the official demo layout, one tree per split (see scripts/export_demos.py):
+#   $DST/{train,val}/<env>/motionplanning/trajectory.state.<mode>.physx_cpu.{h5,json,export_info.json}
+# and $DST/train/<env>/motionplanning/sample.png (first and last frames, cf. the official sample.mp4).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 source scripts/smoke/common.sh
@@ -20,8 +22,9 @@ for task in "${tasks[@]}"; do
   for split in train val; do
     step "$task $split: export" "$PY" scripts/export_demos.py \
         --rgb "$dir/smoke_$split.rgb.$mode.physx_cpu.h5" --state "$dir/smoke_$split.state.$mode.physx_cpu.h5" \
-        -o "$DST/$task/${task}_$split.h5" --split "$split" || continue
+        -o "$(demo_file "$DST" "$split" "$task")" --split "$split" || continue
   done
-  [ -e "$DST/$task/${task}_train.h5" ] && step "$task: preview" "$PY" scripts/smoke/preview_rgb.py "$DST/$task/${task}_train.h5" "$DST/$task/${task}_train_preview.png"
+  train=$(demo_file "$DST" train "$task")
+  [ -e "$train" ] && step "$task: preview" "$PY" scripts/smoke/preview_rgb.py "$train" "$(dirname "$train")/sample.png"
 done
 summary

@@ -25,7 +25,16 @@
 | VariDP 环境 | wsl | `scripts/smoke/setup_teammates.sh`（`REPOS=varidp`） | 克隆并固定 `28afb87`，按其文档 `uv sync` |
 | VariDP 训练评估 | wsl | `scripts/smoke/run_varidp.sh`、`scripts/smoke/varidp_eval.py` | 见 §三.4 |
 
-导出文件格式（`scripts/export_demos.py` 文件头有完整说明）：
+导出文件的命名、目录和 JSON 与官方示范一致（§三.5），每个 split 一棵目录树：
+
+```
+<根目录>/{train,val}/<Env>/motionplanning/trajectory.state.<mode>.physx_cpu.h5
+<根目录>/{train,val}/<Env>/motionplanning/trajectory.state.<mode>.physx_cpu.json              只有官方字段
+<根目录>/{train,val}/<Env>/motionplanning/trajectory.state.<mode>.physx_cpu.export_info.json  本次导出的信息
+<根目录>/train/<Env>/motionplanning/sample.png                                                预览
+```
+
+HDF5 内容（`scripts/export_demos.py` 文件头有完整说明）：
 
 ```
 traj_i/obs            (T+1, D)        float32  obs_mode=state 的扁平向量（含物体位姿，仅供 state 训练）
@@ -72,7 +81,7 @@ traj_i/actions, success, terminated, truncated, env_states
 | PegInsertionSide | 8 / 3 | 7 | 43 | 25 | 128×128×6 |
 | PlugCharger | 6 / 3 | 7 | 46 | 25 | 128×128×6 |
 
-预览图（`data/smoke0925b/<task>/<task>_train_preview.png`）内容正常。PickCube 画面中看不到目标点（ManiSkill 对相机隐藏了 `goal_site`），所以 `obs_rgb/state` 中的 `goal_pos` 是必需的。
+预览图（现为 `data/smoke0925c/train/<Env>/motionplanning/sample.png`）内容正常。PickCube 画面中看不到目标点（ManiSkill 对相机隐藏了 `goal_site`），所以 `obs_rgb/state` 中的 `goal_pos` 是必需的。
 
 ### 4. 阶段 3–4（wsl）
 
@@ -90,6 +99,18 @@ traj_i/actions, success, terminated, truncated, env_states
 | PlugCharger | unet 66.5M | 45 s | 0/8（200 步） |
 
 **对齐检查**：`check_rgb_obs.py --render-backend cpu`。修正后的数据：12 个文件各前 5 条（共 54 条）加 PickCube 全部 15 条，第 0 帧的 `obs` 和 `obs_rgb/state` 与 reset 观测全部一致（差 ≤ 6e-8）。修正前的数据中 PickCube 有 4 条差恰为 1.0，就是 `is_grasped`。
+
+### 5. 改为官方的文件名和 JSON，并与官方数据对比
+
+队友下载并转换过官方 PickCube 示范（`.maniskill/demos/PickCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5`，1000 条，已验证能跑通）。与之对比：
+
+- **HDF5 结构完全相同**：`traj_N/{obs (T+1,42), actions (T,4), success, terminated, truncated, env_states/...}`，键名、dtype、形状一致；我们只多一个 `obs_rgb/` 组，队友代码会忽略它。
+- **同一种子几乎是同一份数据**：种子 0–9 两边长度逐条相同，动作差 ≤ 6e-6，`obs` 差 ≤ 2.4e-4（仅第 0 帧的 `is_grasped` 差 1）。官方示范用的也是同一个运动规划器、同一套种子。
+- **官方数据带有 §四.3、§四.4 的问题**：1000 条里 996 条第 0 帧 `is_grasped` 为 1（只有 4 条对，因为队友用 4 个进程转换，每个进程的第一条不受影响）；`env_states[0]` 的偏差与我们修正的量逐条相同。
+
+随后把导出改成官方的命名和 JSON（导出到 `data/smoke0925c/`）：HDF5 与 `data/smoke0925b/` 逐位相同，只改文件名、目录和 JSON。JSON 的顶层字段（`episodes`、`env_info`、`commit_info`）、每条示范的 6 个字段及其顺序与官方相同；`env_info` 取 state 转换的，`obs_mode` 为 `state`，与 `traj_N/obs` 一致。其余信息移到 `.export_info.json`。仍然不同的只有取值：`env_kwargs` 是 ManiSkill 3.0.1 实际写出的（`sensor_configs`、`sim_backend: physx_cpu`、`reset_kwargs.options: null`），官方是更早版本写的（`shader_dir`、`sim_backend: cpu`、`options: {}`），含义相同，没有改；官方 JSON 的 CRLF 换行来自队友的 Windows，也没有模仿。
+
+在 wsl 上用 VariDP 自己的工具验证新布局：`scripts/check_datasets.py --demo-dir data/smoke0925c/train` 扫到 6 个数据集，`obs_mode` 全为 `state`，维度、条数、长度、动作范围正确；`dp_lib.find_dataset` 自动找到 4 个 4 维任务（7 维任务要 `--h5`，因为它只找 `pd_ee_delta_pos` 后缀，官方数据同样如此）。`make_template_tasks.py` 为 PlugCharger 生成的配置，除数据路径外与队友基于官方数据写的 `task_06` 完全相同（`obs_dim 46`、动作 7、`pd_ee_delta_pose`、200 步）。`check_rgb_obs.py` 在新文件上 24 个首帧全部一致。
 
 ## 四、ManiSkill 3.0.1 的数据问题（已处理）
 
@@ -128,7 +149,8 @@ traj_i/actions, success, terminated, truncated, env_states
 | 位置 | 内容 | 状态 |
 | --- | --- | --- |
 | ubuntu、Mac `demos-smoke0925b/` | 本轮原始轨迹、两次转换、旁路文件（185 MB） | 有效 |
-| Mac、wsl `data/smoke0925b/` | 修正后的导出（401 MB） | 有效，给队员用这份 |
+| Mac、wsl `data/smoke0925c/` | 修正后的导出，官方命名与 JSON | **有效，给队员用这份** |
+| Mac、wsl `data/smoke0925b/` | 与 c 的 HDF5 相同，旧命名与 JSON | 待删除（需确认） |
 | ubuntu、Mac `demos-smoke0925/` | 第一次运行，state 文件有问题 | 待删除（需确认） |
 | Mac、wsl `data/smoke0925/` | 修正第 0 帧前的导出，阶段 4 训练用的是它 | 待删除（需确认） |
 | wsl `~/teammates/VariDP/train/runs/smoke_*` | 本轮 checkpoint 与评估 JSON | 验证用，可删 |
@@ -143,11 +165,11 @@ OUT=demos-smoke0925b scripts/smoke/gen_data.sh
 # Mac
 rsync -a ubuntu:Coding/dp-manip/demos-smoke0925b/ demos-smoke0925b/
 .venv/bin/python scripts/smoke/replay_stats.py demos-smoke0925b
-SRC=demos-smoke0925b DST=data/smoke0925b scripts/smoke/export_data.sh
-rsync -a data/smoke0925b/ wsl:projects/dp-manip/data/smoke0925b/
+SRC=demos-smoke0925b DST=data/smoke0925c scripts/smoke/export_data.sh
+rsync -a data/smoke0925c/ wsl:projects/dp-manip/data/smoke0925c/
 # wsl
 REPOS=varidp scripts/smoke/setup_teammates.sh
-DATA=$PWD/data/smoke0925b VARIDP_BACKEND=cpu scripts/smoke/run_varidp.sh
+DATA=$PWD/data/smoke0925c VARIDP_BACKEND=cpu scripts/smoke/run_varidp.sh
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  .venv/bin/python scripts/smoke/check_rgb_obs.py data/smoke0925b/*/*.h5 --num 5 --render-backend cpu
+  .venv/bin/python scripts/smoke/check_rgb_obs.py data/smoke0925c/*/*/motionplanning/*.h5 --num 5 --render-backend cpu
 ```

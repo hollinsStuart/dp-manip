@@ -27,11 +27,11 @@ specs=()
 for task in "${tasks[@]}"; do
   info=$(task_info "$task") || exit 1
   read -r _ _ steps <<<"$info"
-  specs+=("$task=$steps")
+  specs+=("$task=$steps=$(demo_file "$DATA" train "$task")")
 done
 cd "$TEMPLATE"
 step "make plugins" python3 "$REPO/scripts/smoke/make_template_tasks.py" \
-    --template-dir . --data-dir "$DATA" "${specs[@]}" || { summary; exit 1; }
+    --template-dir . "${specs[@]}" || { summary; exit 1; }
 
 for task in "${tasks[@]}"; do
   plugin=ms_$task
