@@ -12,6 +12,7 @@ source scripts/smoke/common.sh
 SRC=${SRC:-demos-smoke0925}
 DST=${DST:-data/smoke0925}
 PY=${PY:-.venv/bin/python}
+PREFIX=${PREFIX-smoke_}  # raw demo stem prefix used by gen_data.sh
 
 tasks=("$@")
 [ ${#tasks[@]} -gt 0 ] || tasks=("${SMOKE_TASKS[@]}")
@@ -21,7 +22,7 @@ for task in "${tasks[@]}"; do
   dir="$SRC/$env/motionplanning"
   for split in train val; do
     step "$task $split: export" "$PY" scripts/export_demos.py \
-        --rgb "$dir/smoke_$split.rgb.$mode.physx_cpu.h5" --state "$dir/smoke_$split.state.$mode.physx_cpu.h5" \
+        --rgb "$dir/$PREFIX$split.rgb.$mode.physx_cpu.h5" --state "$dir/$PREFIX$split.state.$mode.physx_cpu.h5" \
         -o "$(demo_file "$DST" "$split" "$task")" --split "$split" || continue
   done
   train=$(demo_file "$DST" train "$task")
