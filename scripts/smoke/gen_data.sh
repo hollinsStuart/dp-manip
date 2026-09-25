@@ -10,9 +10,11 @@
 #   first   scripts/first_frame_obs.py writes the correct frame 0 of both conversions to
 #           *.first_obs.h5 sidecars (3.0.1 records stale contacts and a shifted env state)
 #
-# Every step is skipped when its output already exists, so a run can be resumed or run
-# stage by stage; nothing is overwritten. An .h5 without its .json is an interrupted
-# write and fails the step: inspect and remove it by hand.
+# A step that succeeds writes <output>.done; a step whose marker exists is skipped, so a
+# run can be resumed or run stage by stage. Output without a marker is an interrupted or
+# still-running step (RecordEpisode writes the .json while it goes) and fails, never
+# overwritten: inspect and remove it by hand. An expert file whose .json already lists the
+# requested number of episodes counts as complete and gets its marker.
 #
 #   scripts/smoke/gen_data.sh [task ...]                          # smoke: 10 + 5 demos per task
 #   OUT=demos-final PREFIX= N_TRAIN=440 N_VAL=55 N_TRAIN_POSE=700 N_VAL_POSE=90 \
@@ -48,17 +50,42 @@ echo "=== gen_data $(date -Is) at $(git log --oneline -1 | cut -c1-7) OUT=$OUT P
 
 wants() { [[ " $STAGES " == *" $1 "* ]]; }
 
-# once LABEL OUTPUT CMD...: run CMD unless OUTPUT (and its .json) already exists.
+episode_count() {
+  "$PY" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["episodes"]))' "$1" 2>/dev/null
+}
+
+# once LABEL OUTPUT EXPECTED CMD...: run CMD unless OUTPUT is marked complete.
+# EXPECTED is the episode count that proves an unmarked OUTPUT complete, or - for none.
 once() {
-  local label=$1 output=$2; shift 2
-  if [ -e "$output" ] && [ -e "${output%.h5}.json" ]; then
-    RESULTS+=("SKIP  $label: $output exists")
+  local label=$1 output=$2 expected=$3; shift 3
+  local marker="$output.done"
+  if [ -e "$marker" ]; then
+    RESULTS+=("SKIP  $label: done ($marker)")
     return 0
-  elif [ -e "$output" ]; then
-    RESULTS+=("FAIL  $label: $output has no .json (interrupted write?); inspect and remove it by hand")
+  fi
+  if [ -e "$output" ] || [ -e "${output%.h5}.json" ]; then
+    local found
+    found=$(episode_count "${output%.h5}.json")
+    if [ "$expected" != - ] && [ "$found" = "$expected" ]; then
+      echo "$(date -Is) complete: $found episodes (marked afterwards)" > "$marker"
+      RESULTS+=("SKIP  $label: $output has all $found episodes, marked done")
+      return 0
+    fi
+    RESULTS+=("FAIL  $label: $output exists but is not marked done (${found:-?} episodes; interrupted or still running?); inspect and remove it by hand")
     return 1
   fi
-  step "$label" "$@"
+  if step "$label" "$@"; then
+    echo "$(date -Is) $*" > "$marker"
+  else
+    return 1
+  fi
+}
+
+# raw_ready RAW COUNT: the expert file is complete (marker, or all COUNT episodes listed).
+raw_ready() {
+  [ -e "$1.done" ] && return 0
+  [ "$(episode_count "${1%.h5}.json")" = "$2" ] || return 1
+  echo "$(date -Is) complete: $2 episodes (marked afterwards)" > "$1.done"
 }
 
 for task in "${tasks[@]}"; do
@@ -73,17 +100,21 @@ for task in "${tasks[@]}"; do
     rgb="$dir/$name.rgb.$mode.physx_cpu.h5"
     state="$dir/$name.state.$mode.physx_cpu.h5"
     if wants expert; then
-      once "$task $split: expert ($count from seed $start)" "$dir/$name.h5" \
+      once "$task $split: expert ($count from seed $start)" "$dir/$name.h5" "$count" \
           timeout "$TIMEOUT" "$PY" run_cpu.py -e "$env" -b physx_cpu --only-count-success -n "$count" \
           --start-seed "$start" --traj-name "$name" --record-dir "$OUT" || continue
     fi
+    if { wants rgb || wants state || wants first; } && ! raw_ready "$dir/$name.h5" "$count"; then
+      RESULTS+=("FAIL  $task $split: $dir/$name.h5 is missing or incomplete (not $count episodes); conversions skipped")
+      continue
+    fi
     if wants rgb; then
-      once "$task $split: rgb replay" "$rgb" timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
+      once "$task $split: rgb replay" "$rgb" - timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
           --traj-path "$dir/$name.h5" -b physx_cpu --use-first-env-state -c "$mode" -o rgb --shader minimal \
           --save-traj --num-envs 1 || continue
     fi
     if wants state; then
-      once "$task $split: state replay" "$state" timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
+      once "$task $split: state replay" "$state" - timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
           --traj-path "$dir/$name.h5" -b physx_cpu --use-first-env-state -c "$mode" -o state \
           --save-traj --num-envs 1 || continue
     fi
