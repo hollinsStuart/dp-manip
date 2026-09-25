@@ -265,6 +265,8 @@ def main() -> None:
 
     handles = {path: h5py.File(path, "r") for path in {*args.rgb, *args.state}}
     temporary = args.output.with_name(args.output.name + ".tmp")
+    # Directories this run creates; removed again on failure so a rerun finds a clean target.
+    created = [parent for parent in [args.output.parent, *args.output.parent.parents] if not parent.exists()]
     try:
         # Rejected seeds count as conversion failures: "first N" skips them (final-plan §2.2).
         rejected = []
@@ -295,6 +297,9 @@ def main() -> None:
         verify(temporary, selected, handles)
     except BaseException:
         temporary.unlink(missing_ok=True)
+        for directory in created:  # innermost first
+            if directory.exists() and not any(directory.iterdir()):
+                directory.rmdir()
         raise
     finally:
         for handle in handles.values():
