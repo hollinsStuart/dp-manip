@@ -24,10 +24,16 @@ env: ManiSkill writes obs groups with ``track_order=True``, and they are flatten
 here in that order, as ``common.flatten_state_dict`` does. ``obs`` holds object poses
 and is for state-only training; an RGB policy must condition on ``obs_rgb`` only.
 
-Inputs: the rgb replay (``-o rgb -c <mode>`` from the raw pd_joint_pos demos) and a
-state replay of that rgb file (``--use-env-states -o state``). Episodes are paired
-by seed; actions, env_states, success flags and the agent part of the observation
-must agree, which checks that the two replays are aligned step by step.
+Inputs: two conversions of the same raw pd_joint_pos demos, ``--use-first-env-state
+-c <mode> -o rgb`` and ``... -o state``. CPU physics is deterministic, so episodes
+paired by seed must agree in actions, env_states, success flags and the agent part of
+the observation. A state replay with ``--use-env-states`` does not work here: in
+mani-skill 3.0.1 it records the step taken from each set state, not the state itself.
+
+Episodes with an env reset in the middle are dropped and listed in the JSON. In 3.0.1
+a control-mode conversion can save failed attempts and the final successful one as a
+single episode (seen on PlugCharger), with a random action on each reset step; such
+an episode shows a joint jump no controller step can make.
 """
 
 import argparse
@@ -44,6 +50,9 @@ SEED_RANGES = {"train": range(0, 4000), "val": range(4000, 5000)}
 # Dropped by FlattenRGBDObservationWrapper before flattening the rest.
 SENSOR_KEYS = ("sensor_data", "sensor_param")
 ENV_STATE_ATOL = 1e-5
+# Largest joint change allowed between two recorded steps. Panda joints move at most
+# ~0.13 rad per 20 Hz control step; converted demos stay below 0.03, resets jump ~0.48.
+MAX_QPOS_STEP = 0.2
 
 
 def sha256(path: Path) -> str:
@@ -128,6 +137,18 @@ def camera_images(group: h5py.Group) -> tuple[np.ndarray, list[str]]:
         assert image.dtype == np.uint8 and image.ndim == 4 and image.shape[-1] == 3, \
             f"{group.name}/sensor_data/{camera}/rgb: {image.dtype} {image.shape}"
     return np.concatenate(images, axis=-1), cameras
+
+
+def reset_step(group: h5py.Group) -> tuple[int, float] | None:
+    """Return (step, jump) of the first joint jump above MAX_QPOS_STEP, i.e. an env reset."""
+    for articulation in group["env_states/articulations"].values():
+        state = articulation[()]
+        dof = (state.shape[1] - 13) // 2  # root pose 7 + root velocity 6, then qpos and qvel
+        jumps = np.abs(np.diff(state[:, 13:13 + dof], axis=0)).max(axis=1)
+        above = np.flatnonzero(jumps > MAX_QPOS_STEP)
+        if above.size:
+            return int(above[0]) + 1, float(jumps[above[0]])
+    return None
 
 
 def compare_env_states(rgb: h5py.Group, state: h5py.Group, where: str) -> float:
@@ -217,7 +238,7 @@ def main() -> None:
     parser.add_argument("--rgb", nargs="+", type=Path, required=True,
                         help="rgb replay H5 files (JSON alongside), e.g. *.rgb.pd_ee_delta_pos.physx_cpu.h5")
     parser.add_argument("--state", nargs="+", type=Path, required=True,
-                        help="state replays of those rgb files made with --use-env-states; paired by seed")
+                        help="state conversions (-o state) of the same raw demos; paired by seed")
     parser.add_argument("-o", "--output", type=Path, required=True, help="output .h5 path; a .json is written beside it")
     parser.add_argument("--split", choices=sorted(SEED_RANGES), required=True,
                         help="train = pool seeds 0-3999, val = validation demo seeds 4000-4999")
@@ -241,15 +262,27 @@ def main() -> None:
     allowed = SEED_RANGES[args.split]
     outside = [seed for seed in seeds if seed not in allowed]
     assert not outside, f"seeds outside the {args.split} range {allowed.start}-{allowed.stop - 1}: {outside[:10]}"
-    if args.num_demos is not None:
-        assert len(seeds) >= args.num_demos, f"only {len(seeds)} successful demos, need {args.num_demos}"
-        seeds = seeds[: args.num_demos]
-    selected = [{"seed": seed, "rgb": rgb_episodes[seed], "state": state_episodes[seed]} for seed in seeds]
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = args.output.with_name(args.output.name + ".tmp")
     handles = {path: h5py.File(path, "r") for path in {*args.rgb, *args.state}}
+    temporary = args.output.with_name(args.output.name + ".tmp")
     try:
+        # Rejected seeds count as conversion failures: "first N" skips them (final-plan §2.2).
+        rejected = []
+        for seed in seeds:
+            episode = rgb_episodes[seed]
+            found = reset_step(handles[episode["path"]][episode["name"]])
+            if found is not None:
+                step, jump = found
+                rejected.append({"seed": seed, "reason": f"env reset mid-episode: joint jump {jump:.3f} rad at step {step}"})
+                print(f"drop seed {seed} ({episode['path'].name}/{episode['name']}): {rejected[-1]['reason']}")
+        seeds = [seed for seed in seeds if seed not in {item["seed"] for item in rejected}]
+        if args.num_demos is not None:
+            assert len(seeds) >= args.num_demos, f"only {len(seeds)} usable demos, need {args.num_demos}"
+            seeds = seeds[: args.num_demos]
+        assert seeds, "no usable demos"
+        selected = [{"seed": seed, "rgb": rgb_episodes[seed], "state": state_episodes[seed]} for seed in seeds]
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         stats = []
         with h5py.File(temporary, "w") as out:
             for index, item in enumerate(selected):
@@ -277,8 +310,8 @@ def main() -> None:
                       source_state_file=item["state"]["path"].name, source_state_episode_id=item["state"]["meta"]["episode_id"])
         episodes.append(record)
     meta = {
-        # env_info is the rgb replay's, so re-creating the env reproduces obs_rgb; traj_i/obs
-        # comes from the state replay, whose env_info is kept under dp_manip.state_env_info.
+        # env_info is the rgb conversion's, so re-creating the env reproduces obs_rgb; traj_i/obs
+        # comes from the state conversion, whose env_info is kept under dp_manip.state_env_info.
         "env_info": env_info,
         "dp_manip": {
             "layout": "traj_i/obs = obs_mode state; traj_i/obs_rgb/{rgb,state} = FlattenRGBDObservationWrapper(rgb=True, depth=False) of obs_mode rgb",
@@ -295,6 +328,7 @@ def main() -> None:
             "cameras": stats[0]["cameras"],
             "env_state_max_diff": max(s["env_state_max_diff"] for s in stats),
             "seeds": seeds,
+            "rejected": rejected,
             "sources": {path.name: sha256(path) for path in [*args.rgb, *args.state]},
             "state_env_info": state_info,
             "sha256": sha256(args.output),

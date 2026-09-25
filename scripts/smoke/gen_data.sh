@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Phase 1 (ubuntu, expert .venv): short demos for the pipeline check.
 # Per task: N_TRAIN pool demos from seed 0 and N_VAL validation demos from seed 4000
-# (pd_joint_pos, obs none), then an rgb replay converted to the plan's control mode,
-# then a state replay of that rgb file by env states. Only writes under $OUT; a task
-# whose output directory already exists is skipped.
+# (pd_joint_pos, obs none), then two conversions of them to the plan's control mode,
+# one recording rgb and one recording state. CPU physics is deterministic, so both give
+# the same actions and env states; scripts/export_demos.py checks that. (A state replay
+# with --use-env-states records one-step predictions in mani-skill 3.0.1, not the states.)
+# Only writes under $OUT; a task whose output directory already exists is skipped.
 #
 #   scripts/smoke/gen_data.sh [task ...]     # default: the six tasks of final-plan §1
 set -uo pipefail
@@ -42,7 +44,7 @@ for task in "${tasks[@]}"; do
         --traj-path "$dir/$name.h5" -b physx_cpu --use-first-env-state -c "$mode" -o rgb --shader minimal \
         --save-traj --num-envs 1 || continue
     step "$task $split: state replay" timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
-        --traj-path "$dir/$name.rgb.$mode.physx_cpu.h5" -b physx_cpu --use-env-states -o state \
+        --traj-path "$dir/$name.h5" -b physx_cpu --use-first-env-state -c "$mode" -o state \
         --save-traj --num-envs 1 || continue
   done
 done
