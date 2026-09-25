@@ -13,6 +13,8 @@ the first ``--num`` demos it resets with the demo's seed and compares
 
 On physx_cuda initial states differ from CPU for the same seed (final-plan §2.1), so
 there the numbers are only reported. Needs mani-skill 3.0.1; run with our wsl .venv.
+WSL2 has no NVIDIA Vulkan device for ManiSkill's default renderer: pass
+``--render-backend cpu`` there (lavapipe). The state env never renders.
 """
 
 import argparse
@@ -41,6 +43,7 @@ def main() -> int:
     parser.add_argument("files", nargs="+", type=Path, help="scripts/export_demos.py outputs")
     parser.add_argument("--num", type=int, default=3, help="demos per file")
     parser.add_argument("--sim-backend", default="physx_cpu")
+    parser.add_argument("--render-backend", help="default: ManiSkill's (a CUDA Vulkan device); 'cpu' on WSL")
     args = parser.parse_args()
 
     # Same rule as dp_manip/envs.py::ensure_render_icd: lavapipe where there is no NVIDIA ICD.
@@ -53,8 +56,10 @@ def main() -> int:
         env_id = meta["env_info"]["env_id"]
         control_mode = meta["dp_manip"]["control_mode"]
         kwargs = dict(control_mode=control_mode, sim_backend=args.sim_backend, num_envs=1)
-        state_env = gym.make(env_id, obs_mode="state", **kwargs)
-        rgb_env = FlattenRGBDObservationWrapper(gym.make(env_id, obs_mode="rgb", **kwargs), rgb=True, depth=False, state=True)
+        render = {"render_backend": args.render_backend} if args.render_backend else {}
+        state_env = gym.make(env_id, obs_mode="state", render_backend="none", **kwargs)
+        rgb_env = FlattenRGBDObservationWrapper(gym.make(env_id, obs_mode="rgb", **render, **kwargs),
+                                                rgb=True, depth=False, state=True)
         with h5py.File(path, "r") as file:
             for index, episode in enumerate(meta["episodes"][: args.num]):
                 seed = episode["episode_seed"]

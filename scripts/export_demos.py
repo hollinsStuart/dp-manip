@@ -34,6 +34,11 @@ Episodes with an env reset in the middle are dropped and listed in the JSON. In 
 a control-mode conversion can save failed attempts and the final successful one as a
 single episode (seen on PlugCharger), with a random action on each reset step; such
 an episode shows a joint jump no controller step can make.
+
+Frame 0 (observations, image and env state) comes from the ``<replay stem>.first_obs.h5``
+sidecar that scripts/first_frame_obs.py writes next to every input: 3.0.1 records stale
+contacts in the first observation (PickCube ``is_grasped``) and the source's t=1 state
+as ``env_states[0]``. What changed is listed per episode under ``dp_manip.first_frame_fix``.
 """
 
 import argparse
@@ -50,6 +55,8 @@ SEED_RANGES = {"train": range(0, 4000), "val": range(4000, 5000)}
 # Dropped by FlattenRGBDObservationWrapper before flattening the rest.
 SENSOR_KEYS = ("sensor_data", "sensor_param")
 ENV_STATE_ATOL = 1e-5
+# Frame-0 entries that move by less than this are float noise and not listed as changed.
+FIX_REPORT_ATOL = 1e-6
 # Largest joint change allowed between two recorded steps. Panda joints move at most
 # ~0.13 rad per 20 Hz control step; converted demos stay below 0.03, resets jump ~0.48.
 MAX_QPOS_STEP = 0.2
@@ -168,7 +175,19 @@ def compare_env_states(rgb: h5py.Group, state: h5py.Group, where: str) -> float:
     return worst
 
 
-def write_episode(out: h5py.File, index: int, rgb: h5py.Group, state: h5py.Group, where: str) -> dict:
+def sidecar_path(path: Path) -> Path:
+    return path.with_name(path.stem + ".first_obs.h5")
+
+
+def dataset_names(group: h5py.Group) -> list[str]:
+    names = []
+    group.visititems(lambda name, obj: names.append(name) if isinstance(obj, h5py.Dataset) else None)
+    return names
+
+
+def episode_arrays(rgb: h5py.Group, state: h5py.Group, rgb_fix: h5py.Group, state_fix: h5py.Group,
+                   seed: int, where: str) -> dict:
+    """Validated arrays of one episode, frame 0 taken from the first_frame_obs.py sidecars."""
     actions = rgb["actions"][()]
     length = len(actions)
     assert np.array_equal(actions, state["actions"][()]), f"{where}: actions differ between the rgb and state replays"
@@ -184,6 +203,37 @@ def write_episode(out: h5py.File, index: int, rgb: h5py.Group, state: h5py.Group
     proprio, layout = flatten_obs(rgb["obs"])
     assert obs.ndim == 2 and len(obs) == length + 1, f"{where}: state obs is {obs.shape}, need ({length + 1}, D)"
     assert len(images) == length + 1 and len(proprio) == length + 1, f"{where}: rgb obs is not T+1 long"
+
+    # Frame 0 from the sidecars: same seed, same layout, same reset state in both.
+    assert rgb_fix.attrs["seed"] == seed and state_fix.attrs["seed"] == seed, f"{where}: sidecar seed mismatch"
+    fixed_obs = state_fix["obs"][()].astype(np.float32)
+    fixed_images, fixed_cameras = camera_images(rgb_fix["obs"])
+    fixed_proprio, fixed_layout = flatten_obs(rgb_fix["obs"])
+    assert fixed_obs.shape == (1, obs.shape[1]) and fixed_layout == layout and fixed_cameras == cameras, \
+        f"{where}: sidecar frame 0 has a different layout"
+    names = dataset_names(rgb["env_states"])
+    assert dataset_names(rgb_fix["env_states"]) == names == dataset_names(state_fix["env_states"]), \
+        f"{where}: sidecar env_states layout differs"
+    first_state = {name: rgb_fix["env_states"][name][()] for name in names}
+    assert all(np.array_equal(first_state[name], state_fix["env_states"][name][()]) for name in names), \
+        f"{where}: rgb and state sidecars reset to different states"
+    changed_keys, start = [], 0
+    for key, width in layout:
+        if not np.allclose(proprio[0, start:start + width], fixed_proprio[0, start:start + width],
+                           rtol=0, atol=FIX_REPORT_ATOL):
+            changed_keys.append(key)
+        start += width
+    fix = {
+        "seed": seed,
+        "obs_cols": np.flatnonzero(np.abs(obs[0] - fixed_obs[0]) > FIX_REPORT_ATOL).tolist(),
+        "obs_max_change": float(np.abs(obs[0] - fixed_obs[0]).max()),
+        "obs_rgb_state_keys": changed_keys,
+        "image_max_change": int(np.abs(images[0].astype(np.int16) - fixed_images[0].astype(np.int16)).max()),
+        "env_state0_max_change": max(float(np.abs(rgb["env_states"][name][0] - first_state[name][0]).max())
+                                     for name in names),
+    }
+    obs[0], proprio[0], images[0] = fixed_obs[0], fixed_proprio[0], fixed_images[0]
+
     assert np.isfinite(obs).all() and np.isfinite(proprio).all() and np.isfinite(actions).all(), \
         f"{where}: non-finite values"
     # obs_mode=state flattens the same agent dict first, so its leading columns are the
@@ -192,29 +242,38 @@ def write_episode(out: h5py.File, index: int, rgb: h5py.Group, state: h5py.Group
     assert agent_width > 0, f"{where}: rgb obs has no agent entries"
     assert np.allclose(obs[:, :agent_width], proprio[:, :agent_width], atol=ENV_STATE_ATOL), \
         f"{where}: agent obs differ between the rgb and state replays"
+    return {"obs": obs, "images": images, "proprio": proprio, "layout": layout, "cameras": cameras,
+            "actions": actions.astype(np.float32), "first_state": first_state, "fix": fix,
+            "env_state_max_diff": state_diff}
 
+
+def write_episode(out: h5py.File, index: int, rgb: h5py.Group, arrays: dict) -> dict:
+    obs, images, proprio, actions = arrays["obs"], arrays["images"], arrays["proprio"], arrays["actions"]
     group = out.create_group(f"traj_{index}", track_order=True)
     group.create_dataset("obs", data=obs)
     rgb_group = group.create_group("obs_rgb", track_order=True)
     rgb_group.create_dataset("rgb", data=images, chunks=(1, *images.shape[1:]),
                              compression="gzip", compression_opts=5)
     rgb_group.create_dataset("state", data=proprio)
-    group.create_dataset("actions", data=actions.astype(np.float32))
+    group.create_dataset("actions", data=actions)
     for key in ("success", "terminated", "truncated"):
         group.create_dataset(key, data=rgb[key][()].astype(bool))
     rgb.file.copy(rgb["env_states"], group, name="env_states")
+    for name, value in arrays["first_state"].items():
+        group["env_states"][name][0] = value[0]
     return {
-        "length": length,
+        "length": len(actions),
         "obs_dim": obs.shape[1],
-        "proprio_layout": layout,
+        "proprio_layout": arrays["layout"],
         "image_shape": list(images.shape[1:]),
-        "cameras": cameras,
+        "cameras": arrays["cameras"],
         "action_dim": actions.shape[1],
-        "env_state_max_diff": state_diff,
+        "env_state_max_diff": arrays["env_state_max_diff"],
+        "fix": arrays["fix"],
     }
 
 
-def verify(path: Path, expected: list[dict], handles: dict[Path, h5py.File]) -> None:
+def verify(path: Path, expected: list[dict], groups) -> None:
     """Re-read the file the way both teammate loaders do and compare with the sources."""
     with h5py.File(path, "r") as file:
         keys = sorted(file.keys(), key=lambda key: int(key.split("_")[-1]))
@@ -225,12 +284,13 @@ def verify(path: Path, expected: list[dict], handles: dict[Path, h5py.File]) -> 
             actions = np.asarray(group["actions"], dtype=np.float32)
             assert obs.ndim == 2 and actions.ndim == 2 and len(obs) == len(actions) + 1, f"{key}: loader shapes"
             assert bool(group["success"][-1]), f"{key}: loader success filter would drop it"
-            rgb = handles[item["rgb"]["path"]][item["rgb"]["name"]]
-            state = handles[item["state"]["path"]][item["state"]["name"]]
-            assert np.array_equal(obs, state["obs"][()].astype(np.float32)), f"{key}: obs mismatch"
-            assert np.array_equal(actions, rgb["actions"][()].astype(np.float32)), f"{key}: actions mismatch"
-            assert np.array_equal(group["obs_rgb/rgb"][()], camera_images(rgb["obs"])[0]), f"{key}: rgb mismatch"
-            assert np.array_equal(group["obs_rgb/state"][()], flatten_obs(rgb["obs"])[0]), f"{key}: obs_rgb/state mismatch"
+            arrays = episode_arrays(*groups(item), item["seed"], key)
+            assert np.array_equal(obs, arrays["obs"]), f"{key}: obs mismatch"
+            assert np.array_equal(actions, arrays["actions"]), f"{key}: actions mismatch"
+            assert np.array_equal(group["obs_rgb/rgb"][()], arrays["images"]), f"{key}: rgb mismatch"
+            assert np.array_equal(group["obs_rgb/state"][()], arrays["proprio"]), f"{key}: obs_rgb/state mismatch"
+            assert all(np.array_equal(group["env_states"][name][0], value[0])
+                       for name, value in arrays["first_state"].items()), f"{key}: env_states[0] mismatch"
 
 
 def main() -> None:
@@ -263,7 +323,16 @@ def main() -> None:
     outside = [seed for seed in seeds if seed not in allowed]
     assert not outside, f"seeds outside the {args.split} range {allowed.start}-{allowed.stop - 1}: {outside[:10]}"
 
-    handles = {path: h5py.File(path, "r") for path in {*args.rgb, *args.state}}
+    sidecars = {path: sidecar_path(path) for path in [*args.rgb, *args.state]}
+    missing_sidecars = [str(path) for path in sidecars.values() if not path.exists()]
+    assert not missing_sidecars, f"run scripts/first_frame_obs.py first; missing {missing_sidecars}"
+    handles = {path: h5py.File(path, "r") for path in {*args.rgb, *args.state, *sidecars.values()}}
+
+    def groups(item: dict) -> tuple:
+        rgb, state = item["rgb"], item["state"]
+        return (handles[rgb["path"]][rgb["name"]], handles[state["path"]][state["name"]],
+                handles[sidecars[rgb["path"]]][rgb["name"]], handles[sidecars[state["path"]]][state["name"]])
+
     temporary = args.output.with_name(args.output.name + ".tmp")
     # Directories this run creates; removed again on failure so a rerun finds a clean target.
     created = [parent for parent in [args.output.parent, *args.output.parent.parents] if not parent.exists()]
@@ -288,13 +357,12 @@ def main() -> None:
         stats = []
         with h5py.File(temporary, "w") as out:
             for index, item in enumerate(selected):
-                rgb = handles[item["rgb"]["path"]][item["rgb"]["name"]]
-                state = handles[item["state"]["path"]][item["state"]["name"]]
                 where = f"seed {item['seed']} ({item['rgb']['path'].name}/{item['rgb']['name']})"
-                stats.append(write_episode(out, index, rgb, state, where))
+                arrays = episode_arrays(*groups(item), item["seed"], where)
+                stats.append(write_episode(out, index, groups(item)[0], arrays))
         for key in ("obs_dim", "proprio_layout", "image_shape", "cameras", "action_dim"):
             assert all(s[key] == stats[0][key] for s in stats), f"{key} differs between demos"
-        verify(temporary, selected, handles)
+        verify(temporary, selected, groups)
     except BaseException:
         temporary.unlink(missing_ok=True)
         for directory in created:  # innermost first
@@ -334,7 +402,13 @@ def main() -> None:
             "env_state_max_diff": max(s["env_state_max_diff"] for s in stats),
             "seeds": seeds,
             "rejected": rejected,
-            "sources": {path.name: sha256(path) for path in [*args.rgb, *args.state]},
+            "first_frame_fix": {
+                "episodes_changed": sum(bool(s["fix"]["obs_cols"] or s["fix"]["obs_rgb_state_keys"]
+                                             or s["fix"]["image_max_change"]) for s in stats),
+                "env_state0_max_change": max(s["fix"]["env_state0_max_change"] for s in stats),
+                "episodes": [s["fix"] for s in stats],
+            },
+            "sources": {path.name: sha256(path) for path in [*args.rgb, *args.state, *sidecars.values()]},
             "state_env_info": state_info,
             "sha256": sha256(args.output),
         },
@@ -349,6 +423,10 @@ def main() -> None:
           f"obs {summary['obs_dim']}; obs_rgb/state {summary['obs_rgb_state_dim']}; "
           f"obs_rgb/rgb {summary['obs_rgb_image_shape']} from {summary['cameras']}; "
           f"env_states max diff {summary['env_state_max_diff']:.1e}")
+    fixed = summary["first_frame_fix"]
+    keys = sorted({key for episode in fixed["episodes"] for key in episode["obs_rgb_state_keys"]})
+    print(f"frame 0 from sidecars: {fixed['episodes_changed']} episodes changed (obs_rgb/state keys {keys}), "
+          f"env_states[0] moved by up to {fixed['env_state0_max_change']:.1e}")
 
 
 if __name__ == "__main__":

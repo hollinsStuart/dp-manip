@@ -146,6 +146,7 @@ Mac：权威仓库，发起所有同步；数据经 Mac 中转  ◀── rsync 
 | 校验脚本    | `scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py`、`scripts/check_dp_offline.py`、`scripts/replay_check.py` |
 | DP 脚本     | `scripts/train_dp.py`（训练 + 验证）、`scripts/eval_dp.py`（测试种子评估）、`scripts/render_episodes.py`（按保存的状态离线渲染视频） |
 | 数据脚本    | `scripts/inspect_dataset.py`、`scripts/validate_replay.py`、`scripts/check_temporal_windows.py` |
+| RGB 数据链路 | `scripts/first_frame_obs.py`（修正第 0 帧）、`scripts/export_demos.py`（导出给队员的 DP 训练代码）、`scripts/smoke/`（生成、导出、质量统计、VariDP 验证，见 [docs/0925-smoke.md](./docs/0925-smoke.md)） |
 
 复现环境（wsl 项目根）：
 

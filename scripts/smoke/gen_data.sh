@@ -5,6 +5,8 @@
 # one recording rgb and one recording state. CPU physics is deterministic, so both give
 # the same actions and env states; scripts/export_demos.py checks that. (A state replay
 # with --use-env-states records one-step predictions in mani-skill 3.0.1, not the states.)
+# Last, scripts/first_frame_obs.py writes the correct frame 0 of both conversions to
+# *.first_obs.h5 sidecars (3.0.1 records stale contacts and a shifted env state there).
 # Only writes under $OUT; a task whose output directory already exists is skipped.
 #
 #   scripts/smoke/gen_data.sh [task ...]     # default: the six tasks of final-plan §1
@@ -46,6 +48,8 @@ for task in "${tasks[@]}"; do
     step "$task $split: state replay" timeout "$TIMEOUT" "$PY" -m mani_skill.trajectory.replay_trajectory \
         --traj-path "$dir/$name.h5" -b physx_cpu --use-first-env-state -c "$mode" -o state \
         --save-traj --num-envs 1 || continue
+    step "$task $split: first frame" timeout "$TIMEOUT" "$PY" scripts/first_frame_obs.py \
+        "$dir/$name.rgb.$mode.physx_cpu.h5" "$dir/$name.state.$mode.physx_cpu.h5" || continue
   done
 done
 summary
