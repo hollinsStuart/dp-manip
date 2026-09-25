@@ -12,3 +12,5 @@ checkpoints/
 logs/
 .venv-uv-guard/
 .idea/
+.maniskill/
+.maniskill.zip
