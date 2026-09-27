@@ -30,8 +30,9 @@ scripts/sweep.py + slurm/   # 数组作业
 - 正式代码（`dp_manip/`、`scripts/`、`slurm/`、`tests/`）不得 import 或执行这里的文件；
   `tests/test_legacy_boundary.py` 会静态检查这一点，并确认这些资产只存在于 `legacy/` 下。
 - 不要把新功能加到这里。新实验只写 config，不写新 pipeline。
-- `VariDP/` 是 backbone 实现的 donor（见 [`../../VariDP/LEGACY.md`](../../VariDP/LEGACY.md)），
-  已冻结，同样不参与正式实验；UNet / Transformer / MLP 的 canonical 实现已经在
+- `VariDP/` 是 backbone 实现的 donor，已冻结，同样不参与正式实验；它保留在课程集成仓库
+  `hryang1130/7606C` 里（[`VariDP/LEGACY.md`](https://github.com/hryang1130/7606C/blob/main/VariDP/LEGACY.md)），
+  不随本 standalone 仓库分发。UNet / Transformer / MLP 的 canonical 实现已经在
   `dp_manip/backbones/` 里。
 - 不要在这里修历史记录；需要新结论时写新的 run 记录。
 

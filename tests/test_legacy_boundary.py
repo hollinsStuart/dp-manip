@@ -74,9 +74,13 @@ class LegacyBoundaryTest(unittest.TestCase):
             self.assertFalse((ROOT / relative).exists(), f"still at the root: {relative}")
 
     def test_varidp_is_marked_as_a_frozen_donor(self) -> None:
-        notice = ROOT.parent / "VariDP" / "LEGACY.md"
+        # The donor itself is kept in the course repository, which does not have to sit
+        # next to this checkout (standalone upstream). The archive has to declare it.
+        notice = ROOT / "legacy" / "README.md"
         self.assertTrue(notice.is_file())
-        self.assertIn("donor", notice.read_text(encoding="utf-8"))
+        text = notice.read_text(encoding="utf-8")
+        self.assertIn("VariDP", text)
+        self.assertIn("donor", text)
 
     def test_archived_doc_links_resolve(self) -> None:
         # Moving the archive must not leave dangling relative links.
