@@ -1,0 +1,3 @@
+# Compatibility entry point. New commands should use tasks/peginsertionside.toml.
+[legacy]
+task_config = "tasks/peginsertionside.toml"

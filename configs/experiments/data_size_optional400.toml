@@ -1,0 +1,12 @@
+# Conditional follow-up tier; not part of the formal data-size grid.
+[experiment]
+name = "data_size_optional400"
+variable = "data.num_demos"
+values = [400]
+
+[replicates]
+"400" = [1, 2, 3, 4, 5]
+
+[diagnostics]
+# Same shared seeds as the core grid, so N=400 stays comparable with it.
+train_eval_episodes = 25

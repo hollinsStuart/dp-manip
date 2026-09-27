@@ -1,0 +1,3 @@
+# Compatibility entry point. New commands should use tasks/pullcube.toml.
+[legacy]
+task_config = "tasks/pullcube.toml"

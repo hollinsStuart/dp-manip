@@ -1,0 +1,26 @@
+# Reduced-budget smoke grid for the single-job dual-GPU queue and its Slurm
+# entry point (docs/cluster-smoke-test.zh-CN.md). The 200-step budget is not a
+# scientific parameter, so it is passed as an ordinary runtime override, the
+# same way the repo has always allowed temporary smoke budgets:
+#
+#   sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/smoke.toml,DATA_ROOT=...,RUN_ROOT=... \
+#     slurm/train_dual_gpu.sbatch \
+#     --set train.total_iters=200 \
+#     --set train.validation_steps=[200] \
+#     --set train.checkpoint_steps=[200]
+#
+# Formal experiments use configs/experiments/{data_size,backbone}.toml with the
+# baseline budget; this file only shortens the training loop for smoke runs.
+[experiment]
+name = "smoke"
+variable = "policy.backbone"
+values = ["unet", "transformer", "mlp"]
+
+[replicates]
+"unet" = [1]
+"transformer" = [1]
+"mlp" = [1]
+
+[diagnostics]
+# One shared training seed is enough for a `--split train` smoke diagnostic.
+train_eval_episodes = 1

@@ -1,0 +1,19 @@
+# Minimal end-to-end regression budget. Scientific baseline values not listed
+# here continue to come from configs/baseline.toml.
+[data]
+num_demos = 25
+val_num_demos = 1
+
+[diffusion]
+# Keeps closed-loop CPU verification short. Formal experiments use baseline=100.
+num_inference_iters = 2
+
+[train]
+seed = 1
+total_iters = 5
+batch_size = 1
+num_workers = 0
+log_freq = 1
+resume_freq = 1
+validation_steps = [1, 5]
+checkpoint_steps = [1, 5]
