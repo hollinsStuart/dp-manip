@@ -10,13 +10,14 @@ for the dp-manip component; hryang1130/7606C remains the course-level integratio
 
 | 角色 | 身份 | 依据 |
 | --- | --- | --- |
-| 原作者 / 主要作者 | Holly Stewart `hollinsStuart <hollinsyu@gmail.com>` | standalone 仓库全部 46 个提交的作者；课程仓库 `dp-manip/` 路径下 35 个提交（统一 RGB pipeline 重构、backbone 迁移、集群训练/评估入口） |
+| 原作者 / 主要作者 | Holly Stewart `hollinsStuart <hollinsyu@gmail.com>` | standalone 迁移前基线 `b31448e` 的 46 个提交全部由本人提交；课程仓库 `dp-manip/` 路径下 35 个提交（统一 RGB pipeline 重构、backbone 迁移、集群训练/评估入口） |
 | 课程项目贡献者 | `haoran <1946701808@qq.com>` | 课程仓库 `dp-manip/` 路径下最早的 2 个提交（`PLAN.md` 早期计划文档） |
 | 课程集成仓库 | `hryang1130/7606C` | `dp-manip/`、`maniskill-demogen/` 与 `VariDP` donor 的集成与运行记录所在地 |
 
 ## 本清单的来源 / How this list was derived
 
-- 只使用可核验的 Git 身份信息：standalone 仓库（46 个提交，作者均为 `hollinsyu@gmail.com`），
+- 只使用可核验的 Git 身份信息：standalone 仓库在迁移前基线 `b31448e` 上有 46 个提交，作者均为
+  `hollinsyu@gmail.com`（迁移分支在此之上另有 3 个迁移专用提交，不改变作者构成），
   以及课程仓库 `ebc5fd2` 上 `dp-manip/` 路径的历史（`hollinsyu@gmail.com` 35 个提交、
   `1946701808@qq.com` 2 个提交）。
 - 不因仓库归属推断作者；本仓库未新增任何 `Co-authored-by` 署名。
