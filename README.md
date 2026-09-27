@@ -240,3 +240,17 @@ fingerprint，所以一个 checkpoint 能追溯到具体的数据文件。
 只作历史/调试参考，正式代码不得引用；`VariDP/` 是 backbone 的 frozen donor，canonical 实现已在
 `dp_manip/backbones/`。本 README、`PLAN.md` 和 `configs/baseline.toml`、`configs/tasks/` 与
 `configs/experiments/` 是当前权威定义；`configs/*_rgb.toml` 仅为旧命令保留兼容跳转。
+
+## 上游与署名 / Upstream and attribution
+
+dp-manip originated as Holly Stewart's standalone repository and was subsequently
+developed as part of the DASC7606C group project. The unified implementation includes
+contributions from multiple project members, with substantial integration and refactoring
+work performed by Holly Stewart. This standalone repository is now the canonical upstream
+for the dp-manip component; hryang1130/7606C remains the course-level integration repository.
+
+- 本仓库是 `dp-manip` 组件的 canonical upstream：改动先落在这里，再由课程集成仓库
+  `hryang1130/7606C` 以 git subtree（`--squash`）同步到 `dp-manip/`。
+- 数据生成工具 `maniskill-demogen`、backbone donor `VariDP` 以及集群侧的运行记录保留在课程
+  集成仓库，不在本仓库内。
+- 贡献者与署名依据见 [`CONTRIBUTORS.md`](./CONTRIBUTORS.md)。
