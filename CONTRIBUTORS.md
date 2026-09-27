@@ -17,9 +17,10 @@ for the dp-manip component; hryang1130/7606C remains the course-level integratio
 ## 本清单的来源 / How this list was derived
 
 - 只使用可核验的 Git 身份信息：standalone 仓库在迁移前基线 `b31448e` 上有 46 个提交，作者均为
-  `hollinsyu@gmail.com`（迁移分支在此之上另有 3 个迁移专用提交，不改变作者构成），
-  以及课程仓库 `ebc5fd2` 上 `dp-manip/` 路径的历史（`hollinsyu@gmail.com` 35 个提交、
-  `1946701808@qq.com` 2 个提交）。
+  `hollinsyu@gmail.com`；本次迁移分支在该基线之上只包含同步、可移植性和 provenance 文档提交，
+  作者构成不变。
+- 课程仓库 `ebc5fd2` 上 `dp-manip/` 路径的历史为 `hollinsyu@gmail.com` 35 个提交、
+  `1946701808@qq.com` 2 个提交。
 - 不因仓库归属推断作者；本仓库未新增任何 `Co-authored-by` 署名。
 - 课程仓库历史中有 9 个提交带有既有的 `Co-Authored-By: Claude 5.5 <noreply@anthropic.com>`
   trailer（AI 辅助编辑）。该 trailer 保留在课程仓库历史中，此处不重复也不扩展。
