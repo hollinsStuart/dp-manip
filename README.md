@@ -1,250 +1,242 @@
-# dp-manip
+# dp-manip：集群 RGB Diffusion Policy
 
-基于 ManiSkill 的专家轨迹生成 + Diffusion Policy 训练项目。本仓库（Mac）是**唯一权威源**，代码、配置、文档都在这里编辑，再同步到 ubuntu 与 wsl；本文件是入口，负责说明项目流程与进度、设备分工、数据流和常用命令。
+本目录是六个 ManiSkill 任务的 **RGB-based Diffusion Policy** 训练与评估工程。数据由
+`maniskill-demogen` 生成；训练/评估面向 Linux GPU 集群。当前 QOS 每用户只允许 **1 个已提交
+作业**，单作业最多 2 张 GPU，因此生产入口是**一个双 GPU 作业内的动态队列**（两个 worker
+各绑定一张 GPU，先完成的 worker 立即领取下一个 run），不再使用 Job Array。
 
-- 当前状态：[STATUS.md](./STATUS.md)
-- 未完成事项：[TODO.md](./TODO.md)
-- 课程要求与进度对照：[docs/requirements.md](./docs/requirements.md)
-- **操作说明（生成数据 → 传输 → 训练 → 测试，命令与文件位置）**：[docs/instructions.md](./docs/instructions.md)
-- 面向编码代理的操作约束：[AGENT.md](./AGENT.md)
-- 多设备工作流计划：[PLAN.md](./PLAN.md)
-- Day 1 原始记录：[docs/history.md](./docs/history.md)
+保留的研究问题是数据量：对每个任务使用同一训练池的嵌套子集
+`25 ⊂ 50 ⊂ 100 ⊂ 200`，只有在 `100 → 200` 仍未饱和时才增加 `400`。子集固定取
+按示范 seed 升序排序后的前 N 条，与 HDF5 导出顺序和 `episode_id` 无关；因此不同训练
+种子看到完全相同的示范，种子间方差只反映优化随机性。
 
----
+## 六个任务
 
-## 一、项目流程（组内三步 ↔ 仓库）
+| 配置 | 环境 | 控制模式 | 动作维 | 评估步数 |
+| --- | --- | --- | ---: | ---: |
+| `tasks/pickcube.toml` | PickCube-v1 | `pd_ee_delta_pos` | 4 | 100 |
+| `tasks/stackcube.toml` | StackCube-v1 | `pd_ee_delta_pos` | 4 | 200 |
+| `tasks/pushcube.toml` | PushCube-v1 | `pd_ee_delta_pos` | 4 | 100 |
+| `tasks/pullcube.toml` | PullCube-v1 | `pd_ee_delta_pos` | 4 | 100 |
+| `tasks/peginsertionside.toml` | PegInsertionSide-v1 | `pd_joint_pos` | 8 | 300 |
+| `tasks/plugcharger.toml` | PlugCharger-v1 | `pd_joint_pos` | 8 | 200 |
 
-### 组内流程原文
+PegInsertionSide 与 PlugCharger 使用 `pd_joint_pos`，与 `maniskill-demogen/tasks.py` 的最终数据一致。
+绝对关节目标会先按训练子集做 min-max 归一化，执行时还原，不裁剪到 `[-1, 1]`。
 
-1. 基于 ManiSkill 仿真环境，构造 6 个机器人操作任务（PickCube、PushCube 等），在仿真里生成专家轨迹数据集（观测-动作）。操作：下载 [ManiSkill](https://github.com/mani-skill/ManiSkill)，按 [quickstart](https://maniskill.readthedocs.io/en/latest/user_guide/getting_started/quickstart.html) 部署环境、仿真并生成轨迹。
-2. 用第 1 步生成的轨迹训练 Diffusion Policy 策略模型。操作：[real-stanford/diffusion_policy](https://github.com/real-stanford/diffusion_policy) 里的 `train.py`。
-3. 在仿真环境里评估任务成功率；额外选做消融实验，比如轨迹数据量 / 数据质量消融、训练超参 / 网络结构消融，验证各模块贡献。
+## 数据契约
 
-### 每一步在仓库里对应什么
-
-| 步骤 | 机器 | 代码 / 配置 | 待办 | 进度（9.24） |
-| --- | --- | --- | --- | --- |
-| **1. 专家轨迹** | ubuntu 生成（运动规划 + state 重放）；Mac 中转；wsl 使用 | `run_cpu.py`、`patches/`；重放用 `mani_skill.trajectory.replay_trajectory`；校验用 `scripts/validate_replay.py`、`inspect_dataset.py` | [TODO C](./TODO.md) | 六个任务已选定：PickCube、PushCube、PullCube、StackCube、LiftPegUpright、PegInsertionSide。PickCube 已采集 100 条并做了 state 重放；其余 5 个任务各试跑 1 条，专家生成与回放全部通过（9.24），正式采集未开始 |
-| **2. 训练 DP** | wsl | `dp_manip/`、`scripts/train_dp.py`、`configs/*.toml` | [TODO B](./TODO.md) | 训练代码完成；PickCube 基线：100 条示范，final.pt 测试成功率 **0.67**（3 个训练种子平均，范围 0.53–0.77；见 [docs/0923-2249.md](./docs/0923-2249.md)） |
-| **3. 评估 + 消融** | wsl | `scripts/eval_dp.py`（`--split test/val/train`）、`scripts/replay_check.py` | [TODO D](./TODO.md) | 评估完成：固定测试种子、逐种子结果。数据量消融 PickCube 10/25/50/100 条 × 3 个训练种子已完成：平均 0.02 / 0.13 / 0.56 / 0.67 |
-
-当前的做法是先在 PickCube 上把 1→2→3 做深：确认链路可靠、摸清需要多少数据，再铺到另外 5 个任务。
-
-### 和组内流程的两处不同
-
-1. **第 2 步没有直接用 Stanford 的 `train.py`。** 用的是 ManiSkill 官方的 DP 基线（`examples/baselines/diffusion_policy`），网络结构和 Stanford 版相同（1D 条件 UNet + DDPM），能直接读 ManiSkill 数据、直接在 ManiSkill 里评估。Stanford 版要先为每个任务写数据读取和评估模块才能接上 ManiSkill，而且固定 Python 3.9 / torch 1.12 的老环境。在此基础上的改动（动作归一化、验证 / 测试种子分离等）和出处见 [dp_manip/README.md](./dp_manip/README.md)，技术细节见 [STATUS.md](./STATUS.md)「DP 链路」。
-2. **第 3 步的消融不是选做。** 课程大纲把「进一步研究」列为必做，单独占 20 分；评估与分析另占 25 分，要求 held-out 种子、分任务成功率、评估回合数和失败分析。详见 [docs/requirements.md](./docs/requirements.md)。
-
----
-
-## 二、设备分工
-
-| 设备               | SSH 访问        | 项目路径                                      | 硬件                                 | 角色                              | 关键限制                                                            |
-| ------------------ | --------------- | --------------------------------------------- | ------------------------------------ | --------------------------------- | ------------------------------------------------------------------- |
-| MacBook（本机）    | 本地            | `/Users/hollins/Documents/Coding/dp-manip`    | M3 Max / 36 GB                       | 权威仓库、编辑、文档、编排、数据中转、分析 | 装不了 mplib（`libclang==11.0.1` 无 macOS ARM64 wheel），不生成数据 |
-| ubuntu             | `ssh ubuntu`    | `~/Coding/dp-manip`                           | i7-8700K / 16 GB / GTX 1080 Ti 11 GB | 专家轨迹生成 + state 重放         | GTX 1080 Ti（sm_61）与当前 PyTorch CUDA 构建不兼容，**不能训练**    |
-| wsl                | `ssh wsl`       | `~/projects/dp-manip`                         | WSL2 / RTX 4090 / 驱动 591.86        | DP 训练与评估                     | 有 ManiSkill 3.0.1 评估环境，但没有 mplib 规划，不生成数据          |
-
-> SSH 别名定义在 `~/.ssh/config`：`ubuntu` = 10.0.0.200，`wsl` = 10.0.0.248。另有 `ubuntu-frp` 走公网 frp，一般只在局域网不可达时使用。
-
-**一句话原则：ubuntu 造数据，wsl 训模型，Mac 做编排和权威仓库；不要把训练放到 ubuntu，不要在 Mac 上折腾 mplib。**
-
----
-
-## 三、仓库结构
+每个 split 使用 `maniskill-demogen/data/dataset/` 下的文件：
 
 ```text
-dp-manip/
-  README.md AGENT.md STATUS.md TODO.md PLAN.md
-  docs/history.md                           # Day 1 原始记录（原 in.txt）
-  pyproject.toml uv.lock .python-version    # wsl 训练环境；只有 wsl 可以据此 uv sync
-  dp_manip/                                 # Diffusion Policy 实现（改编自 ManiSkill 官方基线，见 dp_manip/README.md）
-  scripts/                                  # 训练 / 评估 / 校验脚本（在 wsl 运行）
-  configs/                                  # 任务级 dataset / training / evaluation 配置
-  run_cpu.py patches/ environment/ mplib-probe-overrides.txt   # ubuntu 专家环境
-  manifests/                                # 数据 SHA-256 清单（入库）
-  demos-*/ data/                            # 数据，gitignore，rsync 传输
-  results/ checkpoints/ logs/               # 训练产出，gitignore，从 wsl 回传
+{train,val}/<Env>/motionplanning/trajectory.state.<control>.physx_cpu.h5
 ```
 
-`.venv/` 在三端各自独立、互不相同，全部 gitignore。Mac 本地 `.venv` 是 9.22 装的 ManiSkill 仿真环境（无 mplib），ubuntu 的是专家环境，wsl 的是训练环境。
-
----
-
-## 四、同步方式
-
-所有 git 与 rsync 操作都由 **Mac 发起**，远端从不主动连接 Mac（细节见 [PLAN.md](./PLAN.md)）：
-
-- **代码 / 配置 / 文档**：Mac 提交 → `git push ubuntu main` / `git push wsl main`。远端仓库设置了 `receive.denyCurrentBranch=updateInstead`，远端有未提交改动时 push 会被拒绝。
-- **wsl 上的临时修改**：在 wsl 本地提交 → Mac `git fetch wsl && git merge --ff-only wsl/main`。
-- **数据**：rsync 传输，传完用 `manifests/*.sha256` 校验。
-- **训练产出**：从 wsl rsync `results/ checkpoints/ logs/` 回 Mac，不带 `--delete`。
-
-日常用 `scripts/sync.sh`（仅在 Mac 执行）：
-
-```bash
-scripts/sync.sh status         # 三端 HEAD、工作区、数据清单
-scripts/sync.sh push           # Mac 提交后推到 ubuntu / wsl
-scripts/sync.sh fetch          # 取回 wsl 上的提交（仅 fast-forward）
-scripts/sync.sh data           # ubuntu demos-*/ → Mac，Mac data/ → wsl，并校验
-scripts/sync.sh manifest       # 新数据产生后重新生成清单，再提交
-scripts/sync.sh pull-results   # wsl 训练产出 → Mac
-```
-
----
-
-## 五、数据流
+训练只读取：
 
 ```text
-ubuntu                                          wsl
-──────                                          ───
-run_cpu.py
-  └─ 专家轨迹 (motionplanning)  ─── rsync ──▶  data/pickcube/*.h5|json
-replay_trajectory --obs-mode state
-  └─ state 观测重放              ─── rsync ──▶  data/pickcube/state/*.h5|json
-                                                       │
-                                                       ▼
-                                                 DP dataset → 训练 → 评估
-                                                       │
-Mac：权威仓库，发起所有同步；数据经 Mac 中转  ◀── rsync ─┘ results / checkpoints / logs
+traj_i/obs_rgb/rgb    uint8   (T+1, 128, 128, 3*C)
+traj_i/obs_rgb/state  float32 (T+1, P)
+traj_i/actions        float32 (T, A)
 ```
 
-原始专家文件只有动作，`obs` 组为空；可训练数据是 `obs_mode: state` 的重放版本。两者都要传递。
+`traj_i/obs` 是特权 state，RGB 策略不会读取。文件名里的 `.state.` 是为了兼容 ManiSkill 官方
+示范布局，不能据此判断训练观测类型。
 
----
+训练文件固定 400 条（种子池 `<4000`），验证示范固定 50 条（种子 `4000–4999`）；闭环验证
+使用 `5000–5049`，正式测试使用 `10000–10099`。
 
-## 六、各设备环境
+`data.num_demos=N` 的选样规则是按 `episode_seed` 升序取前 N 条：同一数据池上
+`N1 < N2` 必有 `seeds(N1) ⊂ seeds(N2)`。同一 split 内 `episode_id` 和 `episode_seed`
+都必须唯一，重复会直接使数据检查失败。实际选中的 seed 记录在 `run.json` 的
+`data_selection` 字段中；`scripts/inspect_dataset.py` 会在提交作业前校验该嵌套不变量。
 
-### ubuntu（专家数据源）
+## 模型与公平性
 
-| 项目          | 值                                                                 |
-| ------------- | ------------------------------------------------------------------ |
-| 系统/硬件     | Ubuntu Server 26.04，i7-8700K，16 GB RAM，GTX 1080 Ti 11 GB         |
-| NVIDIA 驱动   | 580.178.04                                                          |
-| Python        | 3.11.15，虚拟环境 `~/Coding/dp-manip/.venv`                         |
-| 核心包        | `mani-skill==3.0.1`、`mplib==0.2.1`、`sapien==3.0.3`、`numpy==1.26.4` |
-| 依赖冻结      | `environment/ubuntu-expert-freeze.txt`                             |
-| MPlib 覆盖    | `mplib-probe-overrides.txt`（`mplib==0.2.1`）                       |
-| 适配补丁      | `patches/mani_skill_mplib_0_2_1.patch`（`set_base_pose` / `plan_screw`） |
-| 入口          | `run_cpu.py`（CPU 物理 + CPU 渲染）                                 |
+- 每个相机的 3 通道图像从 HDF5 的通道拼接中拆出；默认共享一套 GroupNorm ResNet-18。
+- 每帧视觉特征与 `obs_rgb/state` 的非特权 proprioception 由同一个 observation encoder
+  编码成 `(B, To, Dobs)`；`policy.backbone` 选择 noise predictor，目前有 canonical
+  `unet`（只在 FiLM 边界把序列 flatten 成 `(B, To*Dobs)`）、从 VariDP 迁移的
+  `transformer`（把 `(B, To, Dobs)` 保留为条件 token）和 `mlp`（flatten 后先经该 arm 的 observation MLP `To*Dobs → 256 → 256`，再作为全局条件）。
+- 动作预测/执行 horizon 为 `16/8`，DDPM 训练和推理均为 100 步。
+- 所有任务、N 和训练种子固定 100k optimizer steps；RGB batch 默认为 64。
+- proprio z-score 与 action min/max **只用当前 N 条训练示范**计算。
+- 验证去噪 loss 使用独立的 50 条验证示范；主结果只用 `final.pt`，不按 loss 挑 checkpoint。
+- 闭环评估固定 `physx_cpu`，与数据生成后端一致；策略推理仍在 CUDA 上。
 
-运行方式：`sim_backend="physx_cpu"` + `render_backend="cpu"`，并通过 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json` 指定 Vulkan 驱动。
-
-> ⚠️ 仓库根目录的 `pyproject.toml` / `uv.lock` 是 wsl 的训练环境。**ubuntu 上禁止 `uv sync`**：uv 会把 `.venv` 精确同步成那份 lock，卸掉 mani-skill 与 mplib。ubuntu 环境只按 freeze 文件与补丁重建。
-
-> 旧环境 `~/Coding/dp-manip-old-backup`（含 `.venv-mplib-probe`）和 `~/Coding/dp-manip-clean-venv-backup` 仅作备份，不要在其上继续工作，也不要删除，除非 TODO E 确认。
-
-### wsl（训练节点）
-
-| 项目        | 值                                                                |
-| ----------- | ----------------------------------------------------------------- |
-| 系统/硬件   | WSL2 Ubuntu 24.04.5 LTS，RTX 4090（计算能力 8.9）                  |
-| Python      | 3.11.15，虚拟环境 `~/projects/dp-manip/.venv`，由 `uv 0.12.18` 管理 |
-| 核心依赖    | PyTorch `2.14.0+cu130`、NumPy `1.26.4`、h5py `3.16.0`             |
-| GPU 驱动    | 591.86（`nvidia-smi` 报 CUDA 13.1，PyTorch 运行时 CUDA 13.0）      |
-| 评估与 DP   | mani-skill 3.0.1、sapien 3.0.3、gymnasium 1.3.0（与 ubuntu 一致），diffusers 0.40.0 |
-| 校验脚本    | `scripts/verify_cuda.py`、`scripts/smoke_train_cuda.py`、`scripts/check_dp_offline.py`、`scripts/replay_check.py` |
-| DP 脚本     | `scripts/train_dp.py`（训练 + 验证）、`scripts/eval_dp.py`（测试种子评估）、`scripts/render_episodes.py`（按保存的状态离线渲染视频） |
-| 数据脚本    | `scripts/inspect_dataset.py`、`scripts/validate_replay.py`、`scripts/check_temporal_windows.py` |
-| RGB 数据链路 | `scripts/first_frame_obs.py`（修正第 0 帧）、`scripts/export_demos.py`（导出给队员的 DP 训练代码）、`scripts/smoke/`（生成、导出、质量统计、VariDP 验证，见 [docs/0925-smoke.md](./docs/0925-smoke.md)） |
-
-复现环境（wsl 项目根）：
+## 集群快速开始
 
 ```bash
-export UV_PYTHON_INSTALL_DIR="$PWD/.python"
-export UV_CACHE_DIR="$PWD/.uv-cache"
-uv venv --python 3.11.15
-uv sync --frozen
+# 0. 登录节点：本集群没有 /scratch，数据与输出都放在 $HOME
+export DATA_ROOT=$HOME/maniskill-demogen/data/dataset
+export RUN_ROOT=$HOME/dp-runs
+
+# 1. 登录节点建环境
+./setup.sh
+
+# 2. 在提交作业前检查六套数据（DATA_ROOT 指向 demogen 的 data/dataset）
+.venv/bin/python scripts/inspect_dataset.py --data-root "$DATA_ROOT"
+
+# 3. Gate B：确认每个实验矩阵的 resolved config 只在声明的实验变量上不同
+.venv/bin/python scripts/check_experiment.py --experiment data_size
+.venv/bin/python scripts/check_experiment.py --experiment backbone
+
+# 4. 查看运行清单（可选：run name / run 数，不需要再计算数组下标）
+.venv/bin/python scripts/sweep.py show --experiment configs/experiments/data_size.toml --task peginsertionside
+
+# 5. 提交一个 task 的数据量实验：Slurm 中只有 1 个作业，作业内 2 张 GPU
+sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/data_size.toml,DATA_ROOT="$DATA_ROOT",RUN_ROOT=$RUN_ROOT \
+  slurm/train_dual_gpu.sbatch
+
+# 6. 评估同一 task（completed run 才有 checkpoint；缺 checkpoint 的 run 会在 preflight 明确失败）
+sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/data_size.toml,RUN_ROOT=$RUN_ROOT \
+  slurm/eval_dual_gpu.sbatch
+# 训练曲线诊断：CHECKPOINT=step_060000.pt SPLIT=val；SPLIT=train 走所有嵌套子集共有的前 25 个训练 seed
+sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/data_size.toml,RUN_ROOT=$RUN_ROOT,CHECKPOINT=step_060000.pt,SPLIT=val \
+  slurm/eval_dual_gpu.sbatch
+
+# 7. 轨道 B（backbone）：只切换 EXPERIMENT，RUN_ROOT 必须与第 5 步相同
+#    unet 格子就是 data-size 的 N=100 格子（同名同目录）：已有 final.pt 时直接跳过并复用。
+sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/backbone.toml,DATA_ROOT="$DATA_ROOT",RUN_ROOT=$RUN_ROOT \
+  slurm/train_dual_gpu.sbatch
 ```
 
-venv 无 pip 模块，用 `uv pip ... --python .venv/bin/python` 操作。
+重复提交同一条命令是安全的：`final.pt` 与当前 config 一致的 run 记为 `skipped`，只有
+`resume.pt` 的中断 run 通过 `--resume auto` 继续。`RUN_ROOT` 必须在数据量实验与 backbone
+实验之间保持一致，否则 N=100 UNet 的结果会被当成另一份运行目录重新训练。
 
-### MacBook（本机）
-
-M3 Max / 36 GB。本地 `.venv`（Python 3.11，ManiSkill + Vulkan/MoltenVK）可做仿真与可视化，但 mplib 装不上，所以只承担编辑、文档、数据中转和分析。**Mac 上同样不要 `uv sync`**，否则会把本地 ManiSkill 环境替换成 wsl 的训练依赖。
-
----
-
-## 七、数据资产（PickCube：10 条批次 + 100 条批次，全部成功）
-
-| 名称                     | 内容                                        | 维度                                                        |
-| ------------------------ | ------------------------------------------- | ----------------------------------------------------------- |
-| 原始专家轨迹             | `pickcube_batch10.h5` + `.json`             | `actions float32 (T, 8)`；`obs` 为空                        |
-| state 重放               | `pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,json}` | `obs float32 (T+1, 42)`；`actions float32 (T, 8)` |
-| 100 条批次（原始 + 重放） | `pickcube_batch100{,.state.pd_joint_pos.physx_cpu}.{h5,json}` | 同上 |
-
-- 10 条批次：动作长度 74、74、50、86、76、88、71、74、49、84（共 726 步），seed 0–9。
-- 100 条批次（9.23）：seed 0–100 去掉规划失败的 51；长度 49–99，共 7720 步；**前 10 条与 10 条批次逐值相同**，取前 N 条即可得到嵌套子集。详见 [STATUS.md](./STATUS.md)。
-- 控制模式 `pd_joint_pos`，仿真/渲染后端均为 CPU。
-- H5 顶层为 `traj_0`…`traj_9`，每条一个组；JSON `episodes[].episode_id` 是边界映射。逐步 `terminated`/`truncated` 可能提前变真，切分只能用组 + JSON ID。
-- 三端 SHA-256 一致，清单见 `manifests/ubuntu-demos.sha256`、`manifests/wsl-data.sha256`；各文件哈希也列在 [STATUS.md](./STATUS.md)。
-
-ubuntu 路径：`~/Coding/dp-manip/demos-batch/PickCube-v1/motionplanning/`
-wsl 路径：`data/pickcube/`（原始）与 `data/pickcube/state/`（重放）
-Mac：同时保存两种布局（`demos-*/` 与 `data/`），用作中转和备份。
-
----
-
-## 八、常用命令
-
-### ubuntu：生成专家轨迹
+### 运行中查看
 
 ```bash
-cd ~/Coding/dp-manip
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
-.venv/bin/python run_cpu.py --env-id PickCube-v1 \
-  --sim-backend physx_cpu --only-count-success -n 10 \
-  --traj-name pickcube_batch10 --record-dir demos-batch
+squeue -u "$USER"                                  # 应只有 1 个作业，ID 无 _<array index> 后缀
+tail -f slurm-dp-rgb-train-dual-<jobid>.out        # 调度事件 + completed/skipped/failed/interrupted 汇总
+tail -f $RUN_ROOT/logs/<run name>.log        # 单个训练 run
+tail -f $RUN_ROOT/logs/eval/<run name>.log   # 单个评估 run
 ```
 
-### ubuntu：重放为 state 观测
+`[worker 0]` / `[worker 1]` 分别只看到物理 GPU 0/1（子进程内即逻辑 `cuda:0`）。
+walltime 前 120s 的 `USR1`（`--signal=B:USR1@120`）或手动
+`scancel --signal=USR1 --batch "$JOBID"` 会让队列停止派发新 run、把信号转发给两个 trainer、
+等 `resume.pt` 写完后以 75 退出；`train_dual_gpu.sbatch` 随后 `scontrol requeue`，下一次分配
+跳过已完成 run、续训中断 run。普通 `scancel "$JOBID"`（不带 `--signal`）会直接取消作业，
+不会走 checkpoint → requeue 流程。
+
+### 故障查看
+
+- 顶层 `.out` 出现 `failed <run> exit=N log=<path>`：打开该 run 日志看 traceback。
+- 同名目录里已有其他 config 的 `final.pt`：作业会把它记为 `failed`/`conflict` 并最终非零退出；
+  提交前可用只读的 `scripts/sweep.py plan --experiment ... --task ... --output-root ...`
+  查看 `completed/pending/conflict`，不会启动训练。
+- 评估缺 checkpoint：`eval_queue` preflight 打印 `missing checkpoint <path>`，计入汇总 `failed`，
+  作业非零退出。
+- 双 trainer 并行验证与抢占演练见 `docs/cluster-smoke-test.zh-CN.md`。
+
+统一实验入口（所有实验共用同一个 trainer，只换 config）：
 
 ```bash
-cd ~/Coding/dp-manip
-.venv/bin/python -m mani_skill.trajectory.replay_trajectory \
-  --traj-path demos-batch/PickCube-v1/motionplanning/pickcube_batch10.h5 \
-  --obs-mode state --save-traj --use-env-states \
-  --max-retry 0 --num-envs 1 --verbose
+.venv/bin/python scripts/run_experiment.py \
+  --task pickcube --experiment data_size --value 50 --seed 1 \
+  --data-root "$DATA_ROOT"
+
+.venv/bin/python scripts/run_experiment.py \
+  --task pickcube --experiment backbone --value transformer --seed 1 \
+  --data-root "$DATA_ROOT"
 ```
 
-### Mac：数据中转（ubuntu → Mac → wsl）
+`--task` / `--experiment` 接受 `configs/tasks`、`configs/experiments` 下的短名或显式路径；
+`--value` 按 experiment spec 声明的类型解析（整数 N 或 backbone 名），`--seed`、`--num-demos`
+（难任务轨道 B 的 N_B）、`--data-root` 是运行时覆盖。入口本身没有按 experiment 名称的分支，
+新实验只需新增 config。
+
+`slurm/train_dual_gpu.sbatch` → `scripts/train_queue.py`：每个 run 的命令由
+`dp_manip/runlist.py::train_command` 构造（与 `scripts/sweep.py` 共用同一函数）。单运行入口
+`scripts/train_dp.py` / `scripts/run_experiment.py` 与队列最终都调用
+`dp_manip/trainer.py::run_training`，所以不会出现第二套 trainer：
 
 ```bash
-rsync -a ubuntu:Coding/dp-manip/demos-batch ./
-mkdir -p data/pickcube/state
-cp demos-batch/PickCube-v1/motionplanning/pickcube_batch10.{h5,json} data/pickcube/
-cp demos-batch/PickCube-v1/motionplanning/pickcube_batch10.state.pd_joint_pos.physx_cpu.{h5,json} data/pickcube/state/
-rsync -a data/ wsl:projects/dp-manip/data/
-shasum -a 256 -c manifests/wsl-data.sha256
+.venv/bin/python scripts/train_dp.py \
+  --config configs/tasks/pickcube.toml \
+  --experiment configs/experiments/data_size.toml --experiment-value 25 \
+  --data-root "$DATA_ROOT" --seed 1
 ```
 
-### Mac：重新生成清单（新数据产生后）
+作业收到 Slurm 的 `USR1`/`TERM` 后，队列把信号转发给两个 trainer，各自写
+`checkpoints/resume.pt` 并以状态 75 退出；`train_dual_gpu.sbatch` 等队列 drain 完成后
+requeue，下一次分配自动续训。已存在 `final.pt` 的 run 记为 `skipped`，不会重复训练。
 
-```bash
-ssh ubuntu 'cd ~/Coding/dp-manip && find demos-* -type f | LC_ALL=C sort | xargs sha256sum' > manifests/ubuntu-demos.sha256
-ssh wsl 'cd ~/projects/dp-manip && find data -type f | LC_ALL=C sort | xargs sha256sum' > manifests/wsl-data.sha256
+旧入口兼容状态：`slurm/train_array.sbatch`、`slurm/eval_array.sbatch` 和
+`scripts/sweep.py train/eval --index` 仍然保留，且与队列共用同一套 `train_command` /
+`eval_command`；但多元素 Job Array 在当前 QOS 下会触发 `QOSMaxSubmitJobPerUserLimit`，
+不能用作生产流程（单元素 `--index` 调试仍可用）。正式训练/评估使用 `*_dual_gpu.sbatch`，
+`scripts/train_dp.py` 与 `scripts/run_experiment.py` 单运行入口不变。
+
+`resume.pt` 除 model/optimizer/scheduler/EMA/scaler/step 外还保存 Python、NumPy、
+torch CPU 与 CUDA RNG state；训练 batch 由 `(seed, step)` 直接导出，因此 `resume` 后
+第 k 步的 batch 和噪声与连续训练的第 k 步一致，被抢占次数不影响随机轨迹。
+Phase 5 之前的旧 `resume.pt` 没有 `rng` 字段，仍可续训，但会打印一次 trajectory
+可能偏移的 warning。
+
+## 产物
+
+```text
+runs/<task>_rgb_<backbone>_n<N>_s<seed>/   # backbone 目前为 unet / transformer / mlp
+  run.json
+  metrics.jsonl
+  summary.json
+  checkpoints/
+    step_010000.pt
+    step_030000.pt
+    step_060000.pt
+    final.pt
+    resume.pt
+  eval/
+    test_final.json
 ```
 
-### wsl：环境与数据校验
+中间 checkpoint 用于过拟合/训练进程分析；正式表格只使用 `final.pt`。
 
-```bash
-cd ~/projects/dp-manip
-.venv/bin/python scripts/verify_cuda.py
-.venv/bin/python scripts/smoke_train_cuda.py --amp
-.venv/bin/python scripts/inspect_dataset.py            # 默认检查 state 文件；也可传 path/to/file.h5 [--json path/to/file.json]
-.venv/bin/python scripts/check_temporal_windows.py
-.venv/bin/python scripts/validate_replay.py \
-  data/pickcube/pickcube_batch10.h5 \
-  data/pickcube/state/pickcube_batch10.state.pd_joint_pos.physx_cpu.h5
-```
+每个 run 的日志写在 `RUN_ROOT/logs/` 下：训练为 `logs/<run name>.log`，评估为
+`logs/eval/<run name>.log`（stdout+stderr 合并）。顶层 Slurm `.out` 只保留调度事件和
+`completed/skipped/failed/interrupted` 汇总。
 
-`inspect_dataset.py` 会打印元数据、每条轨迹的形状与类型、数值统计、布尔计数和对齐警告；`check_temporal_windows.py` 用历史长度 2、动作 horizon 8 验证时间窗口不跨 episode。
+`run.json` 保存完整的 resolved config、实际选中的示范 seed、归一化统计，以及 Phase 14
+（§19）的元数据：`experiment_context`（实验名 / variable / value / seed / `control_hash`）、
+`git`（commit / branch / dirty）和 train/val 数据集的 `fingerprint`。`control_hash` 由所有非
+实验变量的值生成，同一 experiment matrix 的同一任务下必须相同；`summary.json` 同样记录
+`control_hash` 和实际训练时长。`train_data`/`val_data`（包括 checkpoint 里的副本）也带回
+fingerprint，所以一个 checkpoint 能追溯到具体的数据文件。
 
----
+## 代码导航
 
-## 九、当前状态与下一步
+- `dp_manip/data.py`：demogen schema 校验、流式统计、HDF5 懒加载 temporal windows。
+- `dp_manip/vision.py`：不依赖 torchvision 的 GroupNorm ResNet-18 与随机平移增强。
+- `dp_manip/observation_encoder.py`：共享 RGB + proprio observation encoder，固定输出 `(B, To, Dobs)`。
+- `dp_manip/backbones/`：`NoisePredictor` 接口、`policy.backbone` 注册表、包装 canonical UNet
+  的 `UNetBackbone` 与从 VariDP 迁移的 `TransformerBackbone`、`MLPBackbone`。
+- `dp_manip/policy.py`：动作归一化、DDPM；把 `(B, To, Dobs)` 序列原样交给 noise predictor；`DiffusionPolicy.from_checkpoint` 是评测与测试共用的 checkpoint 装载口。
+- `dp_manip/trainer.py`：唯一训练 pipeline（resume、采样器、日志、checkpoint、评估 loss）。
+- `dp_manip/invariants.py`：Gate B 声明差异、config diff/prune 与 `control_hash`（checker 和 run 元数据共用）。
+- `dp_manip/metadata.py`：run 元数据辅助（git revision、dataset fingerprint）。
+- `scripts/run_experiment.py`：统一实验入口 `--task/--experiment/--value/--seed`，只解析 config。
+- `scripts/check_experiment.py`：Gate B checker：对比实验矩阵的 resolved config（`--run-root` 时对比实际 `run.json`），输出 `control_hash`。
+- `scripts/train_dp.py`：单运行训练 CLI，与统一入口共用 `dp_manip.trainer`。
+- `scripts/eval_dp.py`：固定种子 RGB 闭环评估。
+- `scripts/sweep.py`：show/plan/index 的薄 CLI；`slurm/train_array.sbatch` 与
+  `slurm/eval_array.sbatch` 是旧 Job Array 入口，仅保留兼容与本地调试，当前 QOS 下不可生产使用。
+- `dp_manip/completion.py`：`final.pt`/`run.json` 完成状态判断（trainer 与调度器共用）。
+- `dp_manip/runlist.py`：运行清单、task 过滤、`train_command`/`eval_command` 与 `plan_runs`。
+- `dp_manip/scheduler.py`：双 worker 动态队列、抢占信号 drain、per-run 日志与失败汇总。
+- `scripts/train_queue.py` / `scripts/eval_queue.py`：单作业双 GPU 的训练/评估队列入口。
+- `slurm/train_dual_gpu.sbatch` / `slurm/eval_dual_gpu.sbatch`：当前 QOS 下推荐的生产入口。
+- `docs/cluster-smoke-test.zh-CN.md`：提交正式 sweep 前的集群 smoke 检查表。
+- `dp_manip/training.py`：EMA、RNG state 存取、`(seed, step)` 确定性 sampler、resume checkpoint 组装。
+- `baselines/phase0/pickcube_rgb.json`：重构前 RGB baseline 的机器可读 regression reference。
+- `legacy/`：Phase 16 归档的 state-based 工作流（含 `run_cpu.py` 与旧 WSL/Ubuntu 清单）；
+  `tests/test_legacy_boundary.py` 保证正式代码不引用它或 VariDP。
+- `docs/phase0-rgb-baseline.md`：Phase 0 行为清单、真实 smoke 结果和复现命令。
+- `PLAN.md`：数据量实验矩阵和运行口径。
 
-- 流程进度见上文「一、项目流程」；详细状态见 [STATUS.md](./STATUS.md)，待办见 [TODO.md](./TODO.md)，每次运行的记录在 `docs/mmdd-hhmm.md`。
-- 刚完成：PickCube 数据量消融 10/25/50/100 条 × 3 个训练种子，平均 0.02 / 0.13 / 0.56 / 0.67，见 [docs/0923-2249.md](./docs/0923-2249.md)。
-- 报告口径：主结果固定用 final.pt，不按验证挑选（见 [configs/README.md](./configs/README.md)）。
-- 之后：其余 5 个任务的专家数据（TODO C）→ 六任务基线 → 选定并完成研究实验。
+旧的本地 state-based 工作流已归档到 `legacy/`（运行记录、旧操作说明、示范生成脚本和旧环境清单），
+只作历史/调试参考，正式代码不得引用；`VariDP/` 是 backbone 的 frozen donor，canonical 实现已在
+`dp_manip/backbones/`。本 README、`PLAN.md` 和 `configs/baseline.toml`、`configs/tasks/` 与
+`configs/experiments/` 是当前权威定义；`configs/*_rgb.toml` 仅为旧命令保留兼容跳转。

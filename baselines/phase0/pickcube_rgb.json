@@ -1,0 +1,182 @@
+{
+  "schema_version": 8,
+  "reference_commit": "834be805df77bd53043bf7270da3fef0fab38d55",
+  "captured_at": "2026-09-26T15:56:29+08:00",
+  "amendments": [
+    {
+      "phase": 7,
+      "change": "canonical_config.policy gained the structural selector policy.backbone=unet; no scientific hyperparameter changed"
+    },
+    {
+      "phase": 9,
+      "change": "canonical_config.policy gained the donor Transformer structure (transformer_layers/heads/embed_dim/dropouts/causal_attn/cond_layers); no scientific hyperparameter changed"
+    },
+    {
+      "phase": 10,
+      "change": "canonical_config.policy gained the donor MLP structure (mlp_hidden_dim/mlp_layers/mlp_time_embed_dim); no scientific hyperparameter changed"
+    },
+    {
+      "phase": 11,
+      "change": "canonical_config.policy gained mlp_obs_feat_dim=256, restoring the MLP arm's observation MLP from VariDP (docs/final-plan.md §6 B2); no scientific hyperparameter changed"
+    },
+    {
+      "phase": 17,
+      "change": "canonical_config.train gained betas=[0.95,0.999], which was hardcoded in the trainer; the value is unchanged and now resolves through baseline.toml"
+    },
+    {
+      "phase": 17,
+      "change": "canonical_config.train.num_workers 8 -> 4 to fit the 4 CPUs per GPU job on the HKU cluster; batches are drawn from (seed, step), so training is unchanged"
+    },
+    {
+      "phase": 18,
+      "change": "canonical_config.train.num_workers 4 -> 3 because one dual-GPU Slurm job runs two trainers on 8 CPUs; batches are drawn from (seed, step), so training is unchanged"
+    }
+  ],
+  "canonical_config": {
+    "task": {
+      "name": "pickcube",
+      "env_id": "PickCube-v1",
+      "control_mode": "pd_ee_delta_pos",
+      "max_episode_steps": 100,
+      "sim_backend": "physx_cpu",
+      "shader_pack": "minimal"
+    },
+    "data": {
+      "root": "data/dataset",
+      "train_path": "train/PickCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5",
+      "val_path": "val/PickCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5",
+      "num_demos": 100,
+      "val_num_demos": 50
+    },
+    "vision": {
+      "feature_dim": 128,
+      "random_shift": 4,
+      "share_camera_encoder": true
+    },
+    "policy": {
+      "backbone": "unet",
+      "obs_horizon": 2,
+      "act_horizon": 8,
+      "pred_horizon": 16,
+      "diffusion_step_embed_dim": 256,
+      "unet_dims": [256, 512, 1024],
+      "kernel_size": 5,
+      "n_groups": 8,
+      "transformer_layers": 8,
+      "transformer_heads": 4,
+      "transformer_embed_dim": 256,
+      "transformer_dropout_emb": 0.0,
+      "transformer_dropout_attn": 0.3,
+      "transformer_causal_attn": true,
+      "transformer_cond_layers": 0,
+      "mlp_hidden_dim": 256,
+      "mlp_layers": 3,
+      "mlp_time_embed_dim": 128,
+      "mlp_obs_feat_dim": 256
+    },
+    "train": {
+      "seed": 1,
+      "total_iters": 100000,
+      "batch_size": 64,
+      "num_workers": 3,
+      "lr": 0.0001,
+      "betas": [0.95, 0.999],
+      "weight_decay": 0.000001,
+      "warmup_steps": 500,
+      "grad_clip": 1.0,
+      "log_freq": 100,
+      "resume_freq": 5000,
+      "validation_steps": [10000, 30000, 60000],
+      "checkpoint_steps": [10000, 30000, 60000],
+      "amp": true
+    },
+    "ema": {"decay": 0.9999},
+    "diffusion": {
+      "num_diffusion_iters": 100,
+      "num_inference_iters": 100
+    },
+    "eval": {
+      "val_seed_start": 5000,
+      "val_episodes": 50,
+      "test_seed_start": 10000,
+      "test_episodes": 100,
+      "num_envs": 4,
+      "inference_seed": 0
+    }
+  },
+  "dataset": {
+    "train": {
+      "num_demos": 25,
+      "num_transitions": 1852,
+      "seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+      "sha256": "f39d68ae294399c2fe31ae1335ab9c1d09ad56c96bb2f6ef0c6dc4f18c5669b6"
+    },
+    "validation": {
+      "num_demos": 1,
+      "num_transitions": 76,
+      "seeds": [4000],
+      "sha256": "97daf8ee0bc9e04f0d6187ebd35c8b7bc26c7b420448050e694d7690c4f71b5a"
+    },
+    "image_shape": [128, 128, 3],
+    "cameras": ["base_camera"],
+    "proprio_dim": 29,
+    "action_dim": 4
+  },
+  "regression_overrides": {
+    "data": {"num_demos": 25, "val_num_demos": 1},
+    "diffusion": {"num_inference_iters": 2},
+    "train": {
+      "seed": 1,
+      "total_iters": 5,
+      "batch_size": 1,
+      "num_workers": 0,
+      "log_freq": 1,
+      "resume_freq": 1,
+      "validation_steps": [1, 5],
+      "checkpoint_steps": [1, 5]
+    }
+  },
+  "normalization": {
+    "proprio": "z-score over observation frames [0:T] of the selected training demos; std below 1e-3 becomes 1",
+    "action": "per-dimension training-subset min/max mapped to [-1,1]; flat ranges expand by +/-1; actions are unnormalized before env.step and not clipped",
+    "state_mean_first3": [-0.013145782053470612, 0.5337787866592407, -0.007108482997864485],
+    "state_std_first3": [0.05594442039728165, 0.17005467414855957, 0.01944482885301113],
+    "action_low": [-0.23087270557880402, -0.21786074340343475, -0.34478560090065, -1.0],
+    "action_high": [0.19476960599422455, 0.3388148546218872, 0.40847405791282654, 1.0]
+  },
+  "observed": {
+    "num_params": 80957124,
+    "train_loss": [1.5008505582809448, 0.8145254850387573, 1.0319931507110596, 0.9992038607597351, 0.8655537366867065],
+    "validation_loss": [1.0786543849267458, 1.0720566777806533],
+    "evaluation": {
+      "split": "val",
+      "seed": 5000,
+      "episode_len": 100,
+      "success_once": 0.0,
+      "success_at_end": 0.0,
+      "return": 0.0
+    },
+    "checkpoint_sha256": {
+      "final.pt": "8c1b0172ca705408f465a60f55d7ed07e660954e446493ac7601b597a9558807",
+      "resume.pt": "687386742e757933ef53b29f905a6a9a5e2817e1f3235b63cc6416864f74eb7a",
+      "step_000001.pt": "ed84d5b3865a77cd200dbc6a04a018886f4edf76e3ca4700471b8b1463aeb352",
+      "step_000005.pt": "84b9653c710a2f8f7a0e62d1d8a6dd1dfcc7986a04dd34f379ded583ca05bb5a"
+    },
+    "checkpoint_format": {
+      "version": 1,
+      "inference_keys": ["config", "format_version", "model", "normalization", "step", "train_data", "val_data"],
+      "resume_keys": ["config", "ema", "format_version", "model", "optimizer", "scaler", "scheduler", "step"],
+      "model_state_entries": 214
+    }
+  },
+  "runtime": {
+    "host": "hollins-ubuntu",
+    "device": "cpu",
+    "python": "3.11.15",
+    "torch": "2.14.0+cu130",
+    "numpy": "1.26.4",
+    "h5py": "3.16.0",
+    "diffusers": "0.40.0",
+    "note": "CPU was used because this Torch CUDA build excludes the host GTX 1080 Ti sm_61 kernels. Formal training remains GPU-only."
+  }
+}

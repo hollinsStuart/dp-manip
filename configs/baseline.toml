@@ -1,0 +1,72 @@
+[task]
+sim_backend = "physx_cpu"
+shader_pack = "minimal"
+
+[data]
+root = "data/dataset"
+num_demos = 100
+val_num_demos = 50
+
+[vision]
+feature_dim = 128
+random_shift = 4
+share_camera_encoder = true
+
+[policy]
+backbone = "unet"
+obs_horizon = 2
+act_horizon = 8
+pred_horizon = 16
+diffusion_step_embed_dim = 256
+unet_dims = [256, 512, 1024]
+kernel_size = 5
+n_groups = 8
+# Transformer backbone structure (donor: VariDP DP-T lowdim configuration).
+transformer_layers = 8
+transformer_heads = 4
+transformer_embed_dim = 256
+transformer_dropout_emb = 0.0
+transformer_dropout_attn = 0.3
+transformer_causal_attn = true
+transformer_cond_layers = 0
+# MLP backbone structure (donor: VariDP local baseline).
+mlp_hidden_dim = 256
+mlp_layers = 3
+mlp_time_embed_dim = 128
+# Observation MLP of the MLP arm (VariDP obs_feat_dim), docs/final-plan.md §6 B2.
+mlp_obs_feat_dim = 256
+
+[train]
+seed = 1
+total_iters = 100000
+batch_size = 64
+# DataLoader workers per trainer. The single dual-GPU job has 8 CPUs and runs
+# two trainers, so the default is 3 each; single-run jobs can override it with
+# --set train.num_workers=N. Batches depend only on (seed, step), so this is a
+# machine knob, not a scientific parameter.
+num_workers = 3
+lr = 1e-4
+betas = [0.95, 0.999]
+weight_decay = 1e-6
+warmup_steps = 500
+grad_clip = 1.0
+log_freq = 100
+resume_freq = 5000
+validation_steps = [10000, 30000, 60000]
+checkpoint_steps = [10000, 30000, 60000]
+amp = true
+
+[ema]
+decay = 0.9999
+
+[diffusion]
+num_diffusion_iters = 100
+num_inference_iters = 100
+
+[eval]
+val_seed_start = 5000
+val_episodes = 50
+test_seed_start = 10000
+test_episodes = 100
+num_envs = 4
+inference_seed = 0

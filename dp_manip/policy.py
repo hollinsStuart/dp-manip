@@ -1,119 +1,193 @@
-"""Diffusion Policy agent (state or rgb observations, 1D conditional UNet, DDPM).
-
-Adapted from ManiSkill examples/baselines/diffusion_policy/train.py and
-train_rgbd.py (haosulab/ManiSkill@62ff3a5, Apache-2.0). Changes from the baseline:
-- dimensions come from the dataset instead of an env object, so the agent can
-  be built and checked without ManiSkill installed;
-- the model works in normalized action space, and `ActionNormalizer` maps
-  sampled actions back to the env's units in `get_action`;
-- checkpoints carry the resolved config and normalizer statistics;
-- state and rgb share one agent: observations go through `ObsEncoder`
-  (identity flatten for state, PlainConv + state for rgb) into the UNet.
-
-Observations are dicts, see dp_manip/obs_encoder.py.
-"""
+"""RGB-conditioned Diffusion Policy built on the shared observation encoder."""
 
 from __future__ import annotations
+
+from typing import Any, Mapping
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
-from .conditional_unet1d import ConditionalUnet1D
-from .config import PolicyConfig
-from .data import ActionNormalizer
-from .obs_encoder import ObsEncoder
+from .backbones import build_noise_predictor
+from .config import DiffusionConfig, PolicyConfig, VisionConfig, from_recorded
+from .data import NormalizationStats
+from .observation_encoder import ObservationEncoder
 
 
 class DiffusionPolicy(nn.Module):
-    def __init__(self, cfg: PolicyConfig, obs_dim: int, act_dim: int, normalizer: ActionNormalizer,
-                 image_shape: tuple[int, int, int] | None = None):
-        """obs_dim is the state width; image_shape (H, W, C) adds the visual encoder."""
-        super().__init__()
-        self.obs_horizon = cfg.obs_horizon
-        self.act_horizon = cfg.act_horizon
-        self.pred_horizon = cfg.pred_horizon
-        self.obs_dim = obs_dim
-        self.act_dim = act_dim
-        self.image_shape = None if image_shape is None else tuple(image_shape)
-        self.normalizer = normalizer
+    """Encode RGB + proprioception and denoise a normalized action sequence."""
 
-        self.obs_encoder = ObsEncoder(
-            cfg.obs_horizon, obs_dim,
-            image_channels=None if image_shape is None else image_shape[-1],
-            visual_feature_dim=cfg.visual_feature_dim,
+    def __init__(
+        self,
+        policy_cfg: PolicyConfig,
+        vision_cfg: VisionConfig,
+        diffusion_cfg: DiffusionConfig,
+        *,
+        image_shape: tuple[int, int, int],
+        proprio_dim: int,
+        action_dim: int,
+        stats: NormalizationStats,
+    ):
+        super().__init__()
+        self.obs_horizon = policy_cfg.obs_horizon
+        self.act_horizon = policy_cfg.act_horizon
+        self.pred_horizon = policy_cfg.pred_horizon
+        self.action_dim = action_dim
+        self.num_inference_iters = diffusion_cfg.num_inference_iters
+        self.observation_encoder = ObservationEncoder(
+            vision_cfg,
+            obs_horizon=policy_cfg.obs_horizon,
+            image_shape=image_shape,
+            proprio_dim=proprio_dim,
+            stats=stats,
         )
-        self.noise_pred_net = ConditionalUnet1D(
-            input_dim=act_dim,
-            global_cond_dim=self.obs_encoder.out_dim,
-            diffusion_step_embed_dim=cfg.diffusion_step_embed_dim,
-            down_dims=cfg.unet_dims,
-            n_groups=cfg.n_groups,
+        # The backbone consumes the shared ``(B, To, Dobs)`` sequence and decides
+        # how to condition on it; the policy itself is backbone-agnostic.
+        self.noise_predictor = build_noise_predictor(
+            policy_cfg.backbone,
+            policy_cfg,
+            obs_dim=self.observation_encoder.output_dim,
+            action_dim=action_dim,
         )
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=cfg.num_diffusion_iters,
-            beta_schedule="squaredcos_cap_v2",  # baseline: large effect on performance
-            clip_sample=True,  # samples are clipped to [-1, 1] -> actions must be normalized
+            num_train_timesteps=diffusion_cfg.num_diffusion_iters,
+            beta_schedule="squaredcos_cap_v2",
+            clip_sample=True,
             prediction_type="epsilon",
         )
+        self.register_buffer("action_low", torch.as_tensor(stats.action_low))
+        self.register_buffer("action_high", torch.as_tensor(stats.action_high))
 
-    def compute_loss(self, obs_seq: dict[str, torch.Tensor], action_seq: torch.Tensor) -> torch.Tensor:
-        """obs_seq values (B, obs_horizon, ...) raw; action_seq (B, pred_horizon, act_dim) normalized."""
-        B = action_seq.shape[0]
-        obs_cond = self.obs_encoder(obs_seq)
-        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=action_seq.device)
+    def normalize_action(self, action: torch.Tensor) -> torch.Tensor:
+        return 2.0 * (action - self.action_low) / (self.action_high - self.action_low) - 1.0
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        checkpoint: Mapping[str, Any],
+        device: str | torch.device = "cpu",
+    ) -> "DiffusionPolicy":
+        """Build an inference policy from a training checkpoint payload.
+
+        This is the single loader used by ``scripts/eval_dp.py`` and the
+        lifecycle tests, so every consumer reads the config, normalization
+        stats, dataset shapes and (possibly legacy) model keys exactly the way
+        the trainer wrote them.
+        """
+        cfg = from_recorded(checkpoint["config"])
+        train_data = checkpoint["train_data"]
+        policy = cls(
+            cfg.policy,
+            cfg.vision,
+            cfg.diffusion,
+            image_shape=tuple(train_data["image_shape"]),
+            proprio_dim=int(train_data["proprio_dim"]),
+            action_dim=int(train_data["action_dim"]),
+            stats=NormalizationStats.from_dict(checkpoint["normalization"]),
+        )
+        load_policy_state_dict(policy, checkpoint["model"])
+        return policy.to(device)
+
+    def unnormalize_action(self, action: torch.Tensor) -> torch.Tensor:
+        return (action + 1.0) * 0.5 * (self.action_high - self.action_low) + self.action_low
+
+    def observation_features(self, rgb: torch.Tensor, proprio: torch.Tensor) -> torch.Tensor:
+        """Return shared observation features shaped ``(B, To, Dobs)``."""
+        return self.observation_encoder(rgb, proprio)
+
+    def compute_loss(
+        self,
+        rgb: torch.Tensor,
+        proprio: torch.Tensor,
+        actions: torch.Tensor,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        obs_features = self.observation_features(rgb, proprio)
+        actions = self.normalize_action(actions.to(dtype=torch.float32))
+        noise = torch.randn(actions.shape, dtype=actions.dtype, device=actions.device, generator=generator)
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (B,), device=action_seq.device
-        ).long()
-        noisy = self.noise_scheduler.add_noise(action_seq, noise, timesteps)
-        noise_pred = self.noise_pred_net(noisy, timesteps, global_cond=obs_cond)
-        return F.mse_loss(noise_pred, noise)
+            0,
+            self.noise_scheduler.config.num_train_timesteps,
+            (actions.shape[0],),
+            device=actions.device,
+            generator=generator,
+        )
+        noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
+        prediction = self.noise_predictor(noisy_actions, timesteps, obs_features)
+        return F.mse_loss(prediction, noise)
 
     @torch.no_grad()
-    def get_action(self, obs_seq: dict[str, torch.Tensor]) -> torch.Tensor:
-        """obs_seq values (B, obs_horizon, ...) -> (B, act_horizon, act_dim) in env units."""
-        state = obs_seq["state"]
-        B = state.shape[0]
-        obs_cond = self.obs_encoder(obs_seq)
-        sample = torch.randn((B, self.pred_horizon, self.act_dim), device=state.device)
-        # Inference uses all training diffusion steps, so set_timesteps is not needed.
-        for k in self.noise_scheduler.timesteps:
-            noise_pred = self.noise_pred_net(sample=sample, timestep=k, global_cond=obs_cond)
-            sample = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=sample).prev_sample
+    def get_action(
+        self,
+        rgb: torch.Tensor,
+        proprio: torch.Tensor,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Return ``(B, act_horizon, action_dim)`` in the environment's units."""
+        obs_features = self.observation_features(rgb, proprio)
+        sample = torch.randn(
+            (rgb.shape[0], self.pred_horizon, self.action_dim),
+            device=rgb.device,
+            generator=generator,
+        )
+        self.noise_scheduler.set_timesteps(self.num_inference_iters, device=rgb.device)
+        # Unlike add_noise(), DDPMScheduler.step() does not move these tensors
+        # to the sample device. A freshly loaded evaluation-only policy has not
+        # called add_noise(), so move them explicitly before CUDA sampling.
+        self.noise_scheduler.alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(rgb.device)
+        self.noise_scheduler.one = self.noise_scheduler.one.to(rgb.device)
+        for timestep in self.noise_scheduler.timesteps:
+            prediction = self.noise_predictor(sample, timestep, obs_features)
+            sample = self.noise_scheduler.step(
+                prediction, timestep, sample, generator=generator
+            ).prev_sample
         start = self.obs_horizon - 1
-        chunk = sample[:, start : start + self.act_horizon]
-        return self.normalizer.unnormalize(chunk)
+        return self.unnormalize_action(sample[:, start : start + self.act_horizon])
 
 
 def num_params(module: nn.Module) -> int:
-    return sum(p.numel() for p in module.parameters())
+    return sum(parameter.numel() for parameter in module.parameters())
 
 
-def save_checkpoint(path, *, policy: DiffusionPolicy, ema_policy: DiffusionPolicy,
-                    config: dict, iteration: int, extra: dict | None = None) -> None:
-    torch.save({
-        "policy": policy.state_dict(),
-        "ema_policy": ema_policy.state_dict(),
-        "normalizer": policy.normalizer.state_dict(),
-        "obs_dim": policy.obs_dim,
-        "act_dim": policy.act_dim,
-        "image_shape": policy.image_shape,
-        "config": config,
-        "iteration": iteration,
-        "extra": extra or {},
-    }, path)
+def adapt_legacy_state_dict(state_dict: Mapping[str, torch.Tensor]) -> dict:
+    """Map pre-refactor keys onto the current module layout.
+
+    Inference checkpoints, resume checkpoints, and EMA shadows written before
+    the observation encoder was extracted keep the camera weights under
+    ``image_encoders.*`` and the proprio buffers at the top level; version-1
+    checkpoints used the legacy ``state_*`` vocabulary. Checkpoints written
+    before the backbone interface name the UNet directly as ``noise_pred_net``.
+    """
+    adapted = state_dict.copy()
+    metadata = getattr(state_dict, "_metadata", None)
+    if metadata is not None:
+        adapted._metadata = metadata
+    for legacy, canonical in (
+        ("state_mean", "observation_encoder.proprio_mean"),
+        ("state_std", "observation_encoder.proprio_std"),
+        ("proprio_mean", "observation_encoder.proprio_mean"),
+        ("proprio_std", "observation_encoder.proprio_std"),
+    ):
+        if legacy in adapted:
+            if canonical in adapted:
+                raise ValueError(f"checkpoint contains both {legacy!r} and {canonical!r}")
+            adapted[canonical] = adapted.pop(legacy)
+    for key in [key for key in adapted if key.startswith("image_encoders.")]:
+        canonical = "observation_encoder." + key
+        if canonical in adapted:
+            raise ValueError(f"checkpoint contains both {key!r} and {canonical!r}")
+        adapted[canonical] = adapted.pop(key)
+    for key in [key for key in adapted if key.startswith("noise_pred_net.")]:
+        canonical = "noise_predictor.unet." + key[len("noise_pred_net.") :]
+        if canonical in adapted:
+            raise ValueError(f"checkpoint contains both {key!r} and {canonical!r}")
+        adapted[canonical] = adapted.pop(key)
+    return adapted
 
 
-def load_checkpoint(path, device: torch.device, use_ema: bool = True):
-    """Return (policy, config dict, checkpoint dict). EMA weights by default, as the baseline evaluates."""
-    from .config import from_dict
-
-    ckpt = torch.load(path, map_location=device, weights_only=False)
-    cfg = from_dict(ckpt["config"])
-    normalizer = ActionNormalizer.from_state_dict(ckpt["normalizer"])
-    policy = DiffusionPolicy(cfg.policy, ckpt["obs_dim"], ckpt["act_dim"], normalizer,
-                             image_shape=ckpt.get("image_shape")).to(device)
-    policy.load_state_dict(ckpt["ema_policy" if use_ema else "policy"])
-    policy.eval()
-    return policy, cfg, ckpt
+def load_policy_state_dict(policy: DiffusionPolicy, state_dict: Mapping[str, torch.Tensor], *, strict: bool = True):
+    """Load a policy, adapting pre-refactor checkpoint key names."""
+    return policy.load_state_dict(adapt_legacy_state_dict(state_dict), strict=strict)

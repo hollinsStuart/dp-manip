@@ -1,0 +1,21 @@
+# Track B (model structure) definition, docs/final-plan.md §6.
+#
+# The experiment variable only selects the noise-prediction backbone; dataset,
+# observation encoder, optimizer, training budget, DDPM, EMA and evaluation all
+# come from the canonical baseline, so the resolved configs of the three arms
+# differ only in ``policy.backbone``. The unet arm reuses the Track A baseline
+# runs at the task's N_B; transformer and mlp add five seeds each.
+[experiment]
+name = "backbone"
+variable = "policy.backbone"
+values = ["unet", "transformer", "mlp"]
+
+[replicates]
+"unet" = [1, 2, 3, 4, 5]
+"transformer" = [1, 2, 3, 4, 5]
+"mlp" = [1, 2, 3, 4, 5]
+
+[diagnostics]
+# Same shared overfitting diagnostic as the data-size grid: the first 25 demo
+# seeds are contained in every training subset and in both N_B choices.
+train_eval_episodes = 25

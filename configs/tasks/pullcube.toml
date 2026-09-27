@@ -1,0 +1,9 @@
+[task]
+name = "pullcube"
+env_id = "PullCube-v1"
+control_mode = "pd_ee_delta_pos"
+max_episode_steps = 100
+
+[data]
+train_path = "train/PullCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5"
+val_path = "val/PullCube-v1/motionplanning/trajectory.state.pd_ee_delta_pos.physx_cpu.h5"

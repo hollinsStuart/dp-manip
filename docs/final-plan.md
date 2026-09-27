@@ -1,6 +1,20 @@
 # 最终实验参数（六任务基线 + 两条研究轨道）
 
+> **历史文档（state-based，2026-09-24）**：当前实现已经按新要求改为 RGB-based，任务和
+> 控制模式以 `../configs/tasks/*.toml` 为准。数据量研究的嵌套 N 档、训练种子数、100k 固定
+> 步数与 held-out seed 段继续沿用；当前可执行计划见 `../PLAN.md`。
+>
+> **9.27 实现口径**：RGB baseline 的 batch 是 64（本文 §4/§8 写的 1024 未采用），EMA 是
+> 自实现的 decay 0.9999（含早期 ramp，不是 diffusers `EMAModel` 0.995），optimizer 的
+> betas (0.95, 0.999) 已进入 `baseline.toml`；lr 1e-4 / weight decay 1e-6 / 100k 步 /
+> 10k-30k-60k 中间 checkpoint 与本文一致。一切以 `configs/baseline.toml` 和
+> `baselines/phase0/pickcube_rgb.json` 为准。
+
 **起草**：9.24 ｜ 课程要求：[requirements.md](./requirements.md) ｜ 参考：组员 VariDP 教程（[实验三_Track3_完整教程.md](https://github.com/hryang1130/VariDP/blob/main/%E5%AE%9E%E9%AA%8C%E4%B8%89_Track3_%E5%AE%8C%E6%95%B4%E6%95%99%E7%A8%8B.md)）
+
+**更新**：9.25 按 VariDP 最新主干（官方 UNet 66.4M ／ 官方 DP-T 8.97M ／ MLP 0.353M）修订 §6、§8、§9.2。
+
+**分工**：scaling / model 两个方向 × 六个任务，谁负责哪些格子、后面训练怎么分，见 §10（9.25 按组内分工表补）。
 
 > **定位**：本文件只定**参数**。在哪台机器上怎么跑，等到学校 GPU 集群上统一训练时再写。
 >
@@ -15,9 +29,10 @@
 - **训练**：所有任务、所有实验都一样：100k 步，batch 1024，lr 1e-4，DDPM 100 步。报告固定用最后一个检查点 `final.pt`，不挑选。
 - **基线**：UNet，100 条，5 个训练种子。
 - **轨道 A**：UNet，N = 25 / 50 / 100 / 200；到 200 条还在涨的任务再加 400。N = 25、50 用 3 个种子，N ≥ 100 用 5 个。
-- **轨道 B**：UNet、Transformer、MLP 三种网络，参数量都在 3–5M，其余设置完全相同。默认 100 条；UNet 在 100 条时接近 0 的难任务改用 200 条。5 个种子。
+- **轨道 B**：UNet、Transformer、MLP 三种主干，都取 VariDP 最新的官方实现（官方 `ConditionalUnet1D` 66.4M ／ 官方 DP-T `TransformerForDiffusion` 8.97M ／ `MLPNoisePred` 0.353M），其余设置完全相同。默认 100 条；UNet 在 100 条时接近 0 的难任务改用 200 条。5 个种子。
 - **分析**：每个格子报告「均值 ± 标准差」；两个格子之间用 bootstrap 比较，区间不含 0 才算有差异。另外用中间检查点分析过拟合，按阶段对失败回合分类。
 - **规模**：固定 156 次训练，最多 186 次。
+- **分工**：两个方向分头跑，**1–2 人跑一个任务**，每人都完整走一遍「采数据 → 训练 → 评测 → 出表」；scaling 侧 6 人、model 侧 4 人，人和格子见 §10。
 
 ---
 
@@ -48,6 +63,10 @@
 | 4 | PullCube-v1 | 非抓取：绕到方块远侧往回**拉** | 方块进入 goal_region | `pd_ee_delta_pos`（4） | 100 |
 | 5 | PegInsertionSide-v1 | 抓取 + 紧公差侧向插入 | peg 头部进入孔中 | `pd_ee_delta_pose`（7） | 300 |
 | 6 | PlugCharger-v1 | 抓取 + 位置和姿态对准的插接 | 距离 ≤ 5 mm **且**角度误差 ≤ 0.2 rad | `pd_ee_delta_pose`（7） | 200* |
+
+> **9.27 实际导出**：PegInsertionSide 与 PlugCharger 的 `pd_ee_delta_pose` 转换成功率未达到
+> §2.3 规定的 90% 门槛，按该预先规则改用 `pd_joint_pos`（8 维）。最终数据以
+> `maniskill-demogen/tasks.py` 和 `dp-manip/configs/tasks/*.toml` 为准；上表保留原计划值。
 
 - **控制模式和回合长度取自 ManiSkill 官方 DP 基线的 `baselines.sh`**：要转动末端的任务用 `pd_ee_delta_pose`。PullCube 没有官方值，按 PushCube 取；PlugCharger 也没有官方值，按 PegInsertionSide 取。
 - **训练步数六个任务统一为 100k**（§3），取官方各任务中的最大值（PegInsertionSide），不再按任务区分。官方给 PickCube、PushCube、StackCube 的是 30k。
@@ -158,17 +177,21 @@
 
 ## 6. 轨道 B：模型结构
 
-**只换去噪网络** ε_θ(a_t, t, obs)。三种主干的输入完全一样：加噪后的动作块（16 × 动作维数）、扩散时间步，以及归一化后的两帧观测拼成的向量。数据、归一化、horizon、DDPM、优化器、步数、EMA、评估，全部与 §3、§4 相同。
+**只换去噪网络** ε_θ(a_t, t, obs)。三种主干拿到的原料完全一样：加噪后的动作块（16 × 动作维数）、扩散时间步，以及归一化后的两帧观测；差别只在「观测怎么注入」。数据、归一化、horizon、DDPM、优化器、步数、EMA、评估，全部与 §3、§4 相同。
 
-| 编号 | 主干 | 结构参数 | 观测怎么注入 | 参数量（实测：4 维动作、42 维观测；7 维动作时差别在 0.1M 以内） | 来源 |
+> 下表按 **VariDP 2026-09-25 的最新主干**填（来源：`VariDP/dp/backbones.py`、`dp_lib.py`、`train_local/README.md` §6）。参数量是 PickCube 口径（4 维动作、42 维观测、Tp 16）的**实测值**，换任务或改 Tp 会变：UNet 的 cond 维度 = obs_dim × To，Transformer 的 cond 维度 = obs_dim。
+
+| 编号 | 主干 | 结构参数 | 观测怎么注入 | 参数量（实测） | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| **B0** | 1D 卷积 UNet | down_dims [64, 128, 256]，kernel 5，GroupNorm 8 组，时间嵌入 64 维 | FiLM（每个残差块） | 4.4M | ManiSkill 官方基线 `conditional_unet1d.py`，与原版 DP 相同 |
-| **B1** | Transformer | d_model 256，4 层，4 头，FFN 1024，pre-LN，因果 mask | 观测和时间步各作为一个前缀 token | 3.2M | VariDP `backbones.py::DiffusionTransformer` |
-| **B2** | MLP | 隐藏层宽 1024，4 层，Mish + LayerNorm，时间嵌入 128 维 | 与动作块、时间嵌入直接拼接 | 3.5M | VariDP `backbones.py::MLPNoisePred`，加宽 |
+| **B0** | 1D 卷积 UNet | 官方 `ConditionalUnet1D`：down_dims [256, 512, 1024]，kernel 5，GroupNorm 8 组，时间嵌入 256 维，`cond_predict_scale=True` | `global_cond` = 归一化 obs 展平（obs_dim × To = 84 维），与时间嵌入拼接后逐通道 FiLM | **66.4M** | VariDP `backbones.py::ConditionalUnet1D`，逐行对齐 real-stanford/diffusion_policy 的论文 lowdim 配置（`train_diffusion_unet_lowdim_workspace.yaml`） |
+| **B1** | Transformer（DP-T） | 官方 `TransformerForDiffusion`：n_layer 8，n_head 4，n_emb 256，FFN 1024，pre-LN，`p_drop_attn=0.3`，因果 mask，`n_cond_layers=0` | cond memory = 时间 token + To 个 obs token（每帧 obs 线性嵌入到 256 维）；动作 token 走 TransformerDecoder 的因果 self-attn + cross-attn | **8.97M** | VariDP `backbones.py::TransformerForDiffusion`，对齐论文 DP-T 的 lowdim 配置 |
+| **B2** | MLP | 隐藏层宽 256，3 层，Mish + LayerNorm，时间嵌入 128 维 | 观测先经一层 MLP（obs_dim × To → 256 → 256）编码，再与展平的动作块、时间嵌入拼接 | **0.353M** | VariDP `backbones.py::MLPNoisePred`，**保持原样，不加宽** |
 
 规则：
 
-- **参数量对齐到同一量级（3–5M）**。VariDP 的 MLP 默认（256 宽、3 层）只有约 0.2M（不含它的观测编码器），不到 UNet 的 1/20，用它比较的话「结构」和「容量」混在一起分不开，所以把 MLP 加宽到 3.5M。B0 用官方 UNet，不用 VariDP 自己写的 UNet（2.8M），因为 B0 同时也是六任务基线，要能说明它就是官方实现。
+- **三种主干都取 VariDP 最新的官方实现，不再做参数量对齐**。2026-09-25 起 VariDP 的 UNet、Transformer 都换成了官方实现的完整移植（旧版 2.806M 的小 UNet、3.348M 的 GPT 式 Transformer 已废弃，checkpoint 结构不兼容、必须重训），MLP 仍是没有对应论文档的自加对照。于是三种主干的容量变成 0.353M : 8.97M : 66.4M，相差约 190 倍，**这不再是「只换结构、容量不变」的对照**。接受这个不对齐有两个理由：B0 同时是六任务基线，必须是官方实现才能和官方结果对照；论文自己的 DP-CNN / DP-T 也不是容量对齐的比较。代价是报告里必须把参数量和 iters/s 并列给出，结论只能限定成「在这三种具体实现之间」，不能写成纯粹的「结构」效应。
+- **「容量对齐」只能当补充档，不进主表**：用现成开关就能调——`--unet-down-dims 64 128 256` 把 UNet 降到约 4M、`--tf-n-layer` / `--tf-n-emb` 把 DP-T 调到 2–4M、`--hidden 1024 --n-layers 4` 把 MLP 加到约 3.5M。跑不跑看剩余机时。
+- **训练速度差很多，排机器时要算进去**：本机（4060 Ti，batch 256）实测 MLP ≈ 97 it/s、DP-T ≈ 18 it/s、官方 UNet ≈ 12 it/s（教程 §附录 A 的估计：UNet ~80 ms/iter、Transformer ~55 ms/iter）。同样 100k 步，UNet 的机时约是 MLP 的 8 倍；§7 的 186 次训练要按「UNet 占大头」估时。
 - **不针对单个主干调参**：三种主干共用 §3 的优化器设置。唯一的例外是某个主干在验证集上明显不收敛：这时只允许在验证 rollout ③ 上为它试 3 个学习率（3e-4 / 1e-4 / 5e-5），选定后在报告里写明。
 - **数据量 N_B 默认取 100；难任务上 N_B 改用 200，免得所有主干都停在 0 附近**：六任务基线跑完后，如果某个任务上 UNet 在 100 条时成功率均值低于 0.10，该任务的轨道 B 改在 200 条上做。B0 在 200 条上的格子直接用轨道 A 的结果。这条规则只看 UNet 的结果，不看 B1、B2，所以不会偏向哪种主干。各任务最终用的 N_B 要写进结果表。
 - 训练种子 1–5。
@@ -204,7 +227,7 @@
 | 项目 | VariDP 教程 | 本计划 | 理由 |
 | --- | --- | --- | --- |
 | 示范来源 | 下载官方数据后转换；另用自写脚本控制器生成 2–3 个任务 | 自己运行官方运动规划器，六个任务全部自己生成 | 课程明确规定只下载数据不算完成；我们的 Linux 机器上 mplib 可用 |
-| 控制模式 | `pd_ee_delta_pos`；Peg、Plug 用 `pd_ee_delta_pose` | **采纳** | 与官方基线一致，可以和官方结果对照 |
+| 控制模式 | `pd_ee_delta_pos`；Peg、Plug 用 `pd_ee_delta_pose` | **采纳**（实际导出 Peg/Plug 用 `pd_joint_pos`，见 §1 注） | 与官方基线一致，可以和官方结果对照 |
 | 回合长度 | 按 `baselines.sh` | **采纳** | 同上 |
 | 训练步数 | 按 `baselines.sh`（30k / 100k）；他的实测里 batch 256 × 30k 步明显训练不足 | 六个任务统一 100k，batch 1024 | 取最大值统一，简单任务也不会训练不足；任务之间可以直接比较 |
 | 训练 / 测试种子 | 训练用 0…n−1，测试用 2000–2049（50 回合） | 训练池从 0 起，验证用 4000+ 和 5000–5049，**测试用 10000–10099（100 回合）** | 测试回合多一倍，评估噪声更小；验证与测试分开。**全组要统一用一套种子** |
@@ -214,15 +237,15 @@
 | 数据量实验 | `demo_frac` 按比例抽随机子集，每个种子抽到的子集不同 | 绝对条数 25/50/100/200（按条件加 400），嵌套，不随种子变化 | 种子间的方差只反映训练随机性；条数也不随示范池的大小而变 |
 | 推理 | DDIM 10 步 | DDPM 100 步 | 与官方基线一致。采样步数本身可以作为轨道 B 的附加测量（同一个检查点换采样步数），但不作为主结果 |
 | batch / EMA | 256 / 0.995 | 1024 / 官方 EMA | 与官方基线一致 |
-| 主干 | MLP / 自写 UNet / Transformer | 官方 UNet / VariDP Transformer / 加宽的 VariDP MLP | 见 §6 |
+| 主干 | MLP / 自写 UNet / Transformer | VariDP 最新的官方实现：官方 `ConditionalUnet1D`（66.4M）/ 官方 DP-T `TransformerForDiffusion`（8.97M）/ `MLPNoisePred`（0.353M） | 见 §6 |
 | 训练种子 | 关键结论至少 3 个 | N = 25、50 用 3 个，N ≥ 100 用 5 个 | 按 pilot 的方差估算，3 个种子只能看出 27 个百分点以上的差距 |
 
 ---
 
 ## 9. 已确认的决定（9.24）
 
-1. **控制模式改用 ee-delta**：PickCube、StackCube、PushCube、PullCube 用 `pd_ee_delta_pos`，PegInsertionSide、PlugCharger 用 `pd_ee_delta_pose`。这与 pilot 用的 `pd_joint_pos` 不同；某个任务的转换成功率低于 90% 时退回 `pd_joint_pos`（§2.3）。
-2. **MLP 加宽到 3.5M**，与 UNet、Transformer 的参数量在同一量级；不另外跑 VariDP 原来的小 MLP。
+1. **控制模式改用 ee-delta**：PickCube、StackCube、PushCube、PullCube 用 `pd_ee_delta_pos`，PegInsertionSide、PlugCharger 用 `pd_ee_delta_pose`。这与 pilot 用的 `pd_joint_pos` 不同；某个任务的转换成功率低于 90% 时退回 `pd_joint_pos`（§2.3）。实际导出时 Peg/Plug 触发了该退回规则，最终用 `pd_joint_pos`（见 §1 注）。
+2. **三种主干统一改用 VariDP 最新的官方实现（9.25 更新）**：UNet = 官方 `ConditionalUnet1D`（66.4M）、Transformer = 官方 DP-T `TransformerForDiffusion`（8.97M）、MLP = `MLPNoisePred`（0.353M）。原先「MLP 加宽到 3.5M、三种主干参数量对齐到 3–5M」的决定作废；参数量不再对齐，理由和报告口径见 §6。
 3. **全组统一种子和检查点口径**：测试种子 10000–10099（100 回合），报告只用 `final.pt`；VariDP 那边相应修改。
 4. **训练步数六个任务统一为 100k**（原先按官方值，四个任务是 30k）。代价是这四个任务的训练时间变为约 3.3 倍；N=25 时每条示范要被看过上万遍，可能过拟合。要在训练到 1/3、2/3 和结束时的验证 rollout 上检查成功率有没有后期下降，如果有，就在报告里如实写明，不改变口径。
 5. **N ≥ 100 的格子用 5 个训练种子**，N = 25、50 用 3 个；测试回合数保持 100 个（§0 有依据）。
@@ -230,3 +253,38 @@
 7. **示范池采 400 条**；某个任务 100 条到 200 条的提升还显著时，给它加 400 条一档（§5）。验证示范的起始种子相应从 3000 改为 4000。
 8. **过拟合分析**：每次训练都在测试集上额外评估 10k / 30k / 60k 三个中间检查点，并在训练种子上评估 `final.pt`（§4）。这些只用于分析，主结果仍是 `final.pt`。评估成本每次训练约增加 15–25%。
 9. **验证示范从 20 条增加到 50 条**（9.25）：它只用于诊断，但生成和计算成本都很低，50 条能覆盖更多初始状态，也和验证 rollout 的 50 回合对齐。PegInsertionSide 大约要试 150 个种子，4000–4999 的种子段够用。
+
+
+## 10. 分工（两个方向 × 六个任务）
+
+> 前面九节定参数，这一节定人：谁在哪个方向、负责哪些格子。分工表来自组内「分工」Google 表格（链接在群里），下表按它填。
+
+**总原则**：**1–2 人跑一个任务**，每个人都完整走一遍「生成示范 → 训练 → 评测 → 出表」的流程，最后汇总成一份报告。
+
+| 任务（§1 的编号） | scaling 侧（六任务基线 + 轨道 A） | model 侧（轨道 B） |
+| --- | --- | --- |
+| 1 PickCube | 王柏雄（Philip） | 杨浩然 |
+| 2 StackCube | 金启正 | 卢森 |
+| 3 PushCube | 王博文 | —（暂未指定） |
+| 4 PullCube | 杨启航 | —（暂未指定） |
+| 5 PegInsertionSide | 余厚成 | 褚家杰 |
+| 6 PlugCharger | 邵春程 | 宋子锐 |
+
+### 10.1 已经做完的：两个方向的训练 / 评测框架
+
+**余厚成**、**杨浩然**、**卢森**、**宋子锐**完成了前期两个方向项目训练评测的开发和适配工作。
+
+### 10.2 后面训练的分工
+
+
+| | scaling 侧（每人） | model 侧（每人） |
+| --- | --- | --- |
+| 负责的格子 | 该任务的六任务基线（UNet · N=100 · 种子 1–5）+ 轨道 A 的全部 N 档（25 / 50 / 100 / 200，按 §5 的条件加 400） | 该任务的轨道 B 两组（Transformer、MLP，各 5 个种子，N_B = 100，或按 §6 改用 200） |
+| 训练次数 | 每个任务 16 次；触发 400 档时 21 次 | 每个任务 10 次（B0 不重跑） |
+| 参照组 B0 | 自己就是参照组 | 直接用 scaling 侧同任务的基线 / 轨道 A 结果 |
+| 报告产出 | 「成功率–N」曲线、相邻档的 bootstrap 比较、该任务的数据量需求 | 主干 × 任务成功率表、效率表、验证去噪 loss 曲线 |
+
+- **共用部分由框架统一保证**，各人不用自己处理：验证示范 50 条、测试种子 10000–10099（100 回合）、归一化统计量只在各自的 N 条上算、报告固定用 `final.pt`（§2、§4）。
+- **汇总**：六个任务、两个方向的结果最后合到同一批表和图里；每一格都要写清方向、N、主干、种子数。
+- **框架的后续维护**（接新任务、修 bug、改评测口径）默认由 10.1 的四个人负责，其他人按 §7 的口径跑即可。
+- 任务 3、4 的 model 侧还没有人；如果最后不补，就在报告里写明这两个任务的轨道 B 没做。

@@ -1,0 +1,3 @@
+# Compatibility entry point. New commands should use tasks/plugcharger.toml.
+[legacy]
+task_config = "tasks/plugcharger.toml"
