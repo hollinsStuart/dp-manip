@@ -37,7 +37,7 @@ from dp_manip.failure_rollout import (  # noqa: E402
 from dp_manip.metadata import file_sha256, git_revision  # noqa: E402
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -55,14 +55,20 @@ def parse_args() -> argparse.Namespace:
     build.add_argument("rollout_dir", type=Path)
     build.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
     build.add_argument("--overwrite", action="store_true", help="replace existing datasets")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def run_collect(args: argparse.Namespace) -> None:
+def default_envs_factory(cfg, num_envs: int, render_backend: str | None):
+    from dp_manip.envs import make_eval_envs
+
+    return make_eval_envs(cfg, num_envs, render_backend)
+
+
+def run_collect(args: argparse.Namespace, envs_factory=default_envs_factory) -> None:
     import torch
 
     from dp_manip.config import from_recorded
-    from dp_manip.envs import environment_kwargs, make_eval_envs
+    from dp_manip.envs import environment_kwargs
     from dp_manip.policy import DiffusionPolicy
 
     protocol = load_protocol(args.protocol)
@@ -91,7 +97,7 @@ def run_collect(args: argparse.Namespace) -> None:
     writer = RolloutWriter(raw_path, env_info=env_info, export_info=export_info, overwrite=args.overwrite)
     started = dt.datetime.now(dt.timezone.utc)
     try:
-        envs = make_eval_envs(cfg, num_envs, args.render_backend)
+        envs = envs_factory(cfg, num_envs, args.render_backend)
     except BaseException:
         writer.abort()
         raise
@@ -165,10 +171,10 @@ def run_build(args: argparse.Namespace) -> None:
     )
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None, envs_factory=default_envs_factory) -> None:
+    args = parse_args(argv)
     if args.command == "collect":
-        run_collect(args)
+        run_collect(args, envs_factory)
     else:
         run_build(args)
 

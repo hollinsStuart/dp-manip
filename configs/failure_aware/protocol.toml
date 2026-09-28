@@ -27,9 +27,12 @@ failure_truncation_factor = 1.5
 low_success_min = 50
 
 [baseline_cell]
-# Mean validation success_once a baseline cell needs to be used normally (§1).
+# Mean validation success_once (over val_seeds) a baseline cell needs to be used
+# normally (§1); the study then runs on the cell's checkpoint_seeds (§4.1).
 min_val_success = 0.15
 max_val_success = 0.85
+val_seeds = [1, 2, 3, 4, 5]
+checkpoint_seeds = [1, 2, 3]
 
 [pilot]
 learning_rates = [1e-5, 1e-4]

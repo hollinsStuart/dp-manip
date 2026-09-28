@@ -113,6 +113,11 @@ def freeze_modules(model: "nn.Module", prefixes: Sequence[str]) -> list[str]:
     return frozen
 
 
+def model_run_name(label: str, lr: float, total_iters: int) -> str:
+    """Run directory of a fine-tuned model inside its rollout directory."""
+    return f"{label}_model_lr{lr:g}_it{int(total_iters)}"
+
+
 def rollout_overrides(
     dataset_dir: Path,
     label: str,

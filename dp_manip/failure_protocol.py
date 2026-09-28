@@ -46,6 +46,8 @@ class CollectionConfig:
 class BaselineCellConfig:
     min_val_success: float
     max_val_success: float
+    val_seeds: tuple[int, ...]
+    checkpoint_seeds: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,8 @@ class FailureProtocol:
         cell = self.baseline_cell
         if not 0.0 <= cell.min_val_success < cell.max_val_success <= 1.0:
             raise ValueError("baseline_cell bounds must satisfy 0 <= min < max <= 1")
+        if not cell.checkpoint_seeds or not set(cell.checkpoint_seeds) <= set(cell.val_seeds):
+            raise ValueError("baseline_cell.checkpoint_seeds must be a non-empty subset of val_seeds")
         pilot = self.pilot
         if not pilot.learning_rates or any(lr <= 0.0 for lr in pilot.learning_rates):
             raise ValueError("pilot.learning_rates must be positive")

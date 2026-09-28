@@ -699,12 +699,14 @@ dp-manip/
 │   ├── failure_rollout.py        # NEW (Phase 1): rollout recording, raw files, dataset build
 │   ├── finetune.py               # NEW (Phase 2): FinetuneSpec, freezing, init/seed/source checks
 │   ├── trainer.py                # Phase 2: optional `finetune=` path; baseline path unchanged
-│   └── failure_guidance.py       # NEW (Phase 3): FailureGuidedPolicy, GuidanceDiagnostics
+│   ├── failure_guidance.py       # NEW (Phase 3): FailureGuidedPolicy, GuidanceDiagnostics
+│   ├── failure_lock.py           # NEW (Phase 4): write-once per-task lock file
+│   └── failure_study.py          # NEW (Phase 4): stage rules, arm resolution, offline losses
 │
 ├── scripts/
 │   ├── collect_rollouts.py       # NEW (Phase 1): `collect --split train|holdout`, `build`
 │   ├── finetune_dp.py            # NEW (Phase 2): thin CLI over trainer.run_training
-│   └── eval_failure_guided.py    # NEW
+│   └── failure_study.py          # NEW (Phase 4): one subcommand per study stage, incl. `eval`
 │
 ├── configs/
 │   └── failure_aware/
@@ -714,10 +716,11 @@ dp-manip/
 ├── tests/
 │   ├── test_failure_rollout.py   # NEW (Phase 1)
 │   ├── test_finetune.py          # NEW (Phase 2)
-│   └── test_failure_guidance.py  # NEW (Phase 3)
+│   ├── test_failure_guidance.py  # NEW (Phase 3)
+│   └── test_failure_study.py     # NEW (Phase 4): rules, lock file, end-to-end study on fakes
 │
-└── docs/
-    └── failure-aware.md          # concise implementation contract if desired
+└── slurm/
+    └── failure_aware.sbatch      # NEW (Phase 4): one study step per single-GPU job, requeue on exit 75
 ```
 
 ### 7.3 `policy.py` change boundary
@@ -875,6 +878,21 @@ After the implementation is frozen:
 9. freeze everything, run the test set once per (arm, checkpoint);
 10. report counts, paired bootstrap for H1–H3, latency, diagnostics, failure-type shift.
 
+**Runbook (implemented in Phases 1–4).** Every step is one job: `sbatch slurm/failure_aware.sbatch <script> <arguments>` (the QOS allows one job per user). `T=peginsertionside`, `CKPT_s` is checkpoint `s`'s `final.pt` as locked in `[checkpoints]`, `DIR_s` its rollout directory `<run root>/failure_aware/T/s<s>`:
+
+| Step | Command | Locks |
+| --- | --- | --- |
+| 1 | `scripts/failure_study.py select-cell --task T --run-root <main-track run root>` | `[task]`, `[checkpoints]` |
+| 2, 4 | per checkpoint: `scripts/collect_rollouts.py collect CKPT_s --split train`, `... --split holdout`, `... build DIR_s`, then `scripts/failure_study.py record-collection --task T --seed s` | `[collection.s<s>]` |
+| 3 | `scripts/finetune_dp.py CKPT_1 --label failure --lr <lr> --steps 20000 --checkpoint-steps 5000 10000` for each pilot lr, then `scripts/failure_study.py pilot --task T` | `[finetune]` |
+| 5 | `scripts/finetune_dp.py CKPT_s --label failure\|success --lr <locked lr> --steps <locked steps>` for the remaining models, then `record-models --task T --seed s` | `[models.s<s>]` |
+| 6 | `scripts/failure_study.py gate --task T` | `[gate]` |
+| 7 | `scripts/failure_study.py dry-run --task T` — also the `α = 0` reproduction check (§8 Phase 3) on the same 8 episodes | `[guidance.dry_run]` |
+| 8 | `eval --task T --split tuning --arm F`, `--arm A`; `select-alpha`; `eval --split tuning --arm C1`; `select-c1` | `[guidance.selection]`, `[guidance.c1]` |
+| 9 | commit the lock file; `eval --task T --split test --arm B\|F\|A\|C1\|C2` | — |
+
+`scripts/failure_study.py status --task T` prints the locked stages and the GPU-hours recorded so far (re-projection, §10.3).
+
 ---
 
 ## 9. Expected Final Story for the Report
@@ -936,7 +954,7 @@ Everything below assumes the worst-case episode length (PegInsertionSide, 300 st
 | Collection, 3 checkpoints | 1,500 (0) – 2,100 (0) | 3.8 | 5.3 | train until both classes reach K (300–600) + 100 holdout |
 | lr/steps pilot (checkpoint 1) | — | 1.6 | 1.6 | 2 runs × 20k steps; the chosen one is reused as checkpoint 1's failure model |
 | Remaining fine-tunes | — | 2.0 | 4.0 | 5 runs (ckpt 1 success; ckpt 2–3 failure + success) at 10k or 20k steps |
-| `α = 0` reproduction check | 20 (20) | 0.1 | 0.1 | §8 |
+| `α = 0` reproduction check | 8 (8) | 0.05 | 0.05 | same episodes as the dry run, plus 8 baseline episodes |
 | Dry run for `m` | 8 (8) | 0.05 | 0.05 | checkpoint 1 |
 | Tuning: F, A, C1 × 3 α × 48 eps × 3 ckpts | 1,296 (1,296) | 5.2 | 5.2 | §5.5 |
 | Test: F, A, C1 × 3 ckpts × 100 | 900 (900) | 3.6 | 3.6 | |
@@ -1020,21 +1038,25 @@ No PlugCharger run is part of the current study. This section fixes what the Peg
   - `configs/failure_aware/<task>.toml` — per-task **lock file**, filled stage by stage and never edited after the stage that fills it:
 
   ```toml
-  [task]           # name, baseline cell N, baseline val success (mean and per seed), mode (normal | low-success)
-  [checkpoints]    # ckpt seed -> path, sha256
-  [collection.s1]  # rollouts used, K, L_fail, fraction of failure steps truncated (one table per ckpt seed)
-  [finetune]       # lr, steps, source = "pilot" | "transferred:<task>"
-  [gate]           # per ckpt seed: gap_fail, gap_succ, pass
-  [guidance]       # m, alpha_fixed, alpha_adaptive, guidance_arm, alpha_c1, source = "tuned" | "transferred:<task>"
-  [budget]         # measured GPU-h per 100 baseline / guided episodes, GPU-h spent
+  [task]                 # name, baseline cell N, mode (normal | low-success), val success per seed
+  [checkpoints.s1]       # path, sha256 (one table per ckpt seed)
+  [collection.s1]        # rollouts, successes, failures, K, L_fail, low_success, summary sha256
+  [finetune]             # lr, steps, source = "pilot" | "transferred:<task>", pilot candidates and margins
+  [models.s1]            # failure / success model paths and sha256
+  [gate]                 # passed; per ckpt seed: losses, gap_fail, gap_succ, pass
+  [guidance.dry_run]     # m, mean cosine, alpha0_reproduces_baseline
+  [guidance.selection]   # per arm: grid value, alpha, pooled successes, grid edge; guidance_arm
+  [guidance.c1]          # C1 grid value, mode, alpha, pooled successes
   ```
+
+  `dp_manip/failure_lock.py` writes each section once and refuses to replace it. GPU-hours are not locked (they grow); `failure_study.py status` sums them from the rollout, fine-tuning and evaluation records.
 
   Test results live in the evaluation JSON files, never in the lock file. Evaluation scripts read checkpoints, α and guidance mode **only** from the lock file (§8 Phase 4, criterion 3).
 - **Tests cover both tasks from the start.** Config-resolution and lock-file tests, and the synthetic-data dataset/rollout-schema tests, are parametrized over `peginsertionside` and `plugcharger`, so the PlugCharger path is exercised even though it is not run.
 
 ### 12.2 PegInsertionSide lock file
 
-`configs/failure_aware/peginsertionside.toml` is written during §8 Phase 5: `[task]` and `[checkpoints]` in step 1, `[collection.*]` in steps 2 and 4, `[finetune]` in step 3, `[gate]` in step 6, `[guidance]` in steps 7–8, and `[budget]` throughout. It is committed before the test evaluation (step 9).
+`configs/failure_aware/peginsertionside.toml` is written during §8 Phase 5 by the runbook's commands: `[task]` and `[checkpoints]` in step 1, `[collection.*]` in steps 2 and 4, `[finetune]` in step 3, `[models.*]` in step 5, `[gate]` in step 6, `[guidance.*]` in steps 7–8. It is committed before the test evaluation (step 9).
 
 ### 12.3 What transfers to PlugCharger and what is re-derived
 

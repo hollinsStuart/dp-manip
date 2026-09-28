@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 from dp_manip import config as config_lib  # noqa: E402
 from dp_manip.failure_protocol import DEFAULT_PROTOCOL, load_protocol  # noqa: E402
 from dp_manip.failure_rollout import DATASET_DIR, rollout_dir_for  # noqa: E402
-from dp_manip.finetune import FinetuneSpec, rollout_overrides  # noqa: E402
+from dp_manip.finetune import FinetuneSpec, model_run_name, rollout_overrides  # noqa: E402
 
 FROZEN_MODULES = ("observation_encoder",)  # plan §2.2
 LR_SCHEDULE = "constant_with_warmup"  # plan §4.4
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     return run_training(
         cfg,
         output_root=args.output_root or rollout_dir,
-        run_name=args.exp or f"{args.label}_model_lr{args.lr:g}_it{args.steps}",
+        run_name=args.exp or model_run_name(args.label, args.lr, args.steps),
         device=args.device,
         resume=args.resume,
         finetune=spec,
