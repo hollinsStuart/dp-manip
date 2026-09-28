@@ -555,7 +555,7 @@ fixed:     alpha ∈ {0.5, 1.0, 2.0}
 adaptive:  alpha ∈ {0.5, 1.0, 2.0} / m
 ```
 
-where `m` is the mean of `(1 − c_k)/2` over all denoising steps, measured in a **success-blind dry run**: 8 guidance-tuning episodes (seeds 22000–22007) of checkpoint seed 1, logging cosines only. `m` is computed once per task, recorded, and never re-estimated after success rates are seen. The adaptive arm then spans the same mean λ as the fixed arm.
+where `m` is the mean of `(1 − c_k)/2` over all denoising steps, measured in a **success-blind dry run**: 8 guidance-tuning episodes (seeds 22000–22007) of checkpoint seed 1, run at `α = 0` (the baseline trajectory, so `m` does not depend on any α) with the negative model evaluated only to log cosines (`GuidanceDiagnostics.mean_half_one_minus_cos`). `m` is computed once per task, recorded, and never re-estimated after success rates are seen. The adaptive arm then spans the same mean λ as the fixed arm.
 
 **Tuning set:** seeds 22000–22047 (48 episodes) per checkpoint, pooled over checkpoints 1–3 (144 episodes per α). Spreading the tuning episodes over checkpoints keeps α from being fitted to one checkpoint; 48 per checkpoint is what the 24 GPU-hour budget allows (§10), and a multiple of `num_envs = 4` as `evaluate` requires. The 50-episode validation range 5000–5049 is not used: it is already consumed by task selection.
 
@@ -692,14 +692,14 @@ Failure rollouts depend on a trained Diffusion Policy checkpoint, so failure-awa
 ```text
 dp-manip/
 ├── dp_manip/
-│   ├── policy.py                 # existing; only minimal reusable API changes
+│   ├── policy.py                 # Phase 3: get_action -> observation_features + sample_actions
 │   ├── evaluate.py               # reuse; read-only RolloutObserver hook (Phase 1)
 │   ├── data.py                   # reuse RGBWindowDataset unchanged
 │   ├── failure_protocol.py       # NEW (Phase 1): loads and checks the protocol file
 │   ├── failure_rollout.py        # NEW (Phase 1): rollout recording, raw files, dataset build
 │   ├── finetune.py               # NEW (Phase 2): FinetuneSpec, freezing, init/seed/source checks
 │   ├── trainer.py                # Phase 2: optional `finetune=` path; baseline path unchanged
-│   └── failure_guidance.py       # NEW: FailureGuidedPolicy
+│   └── failure_guidance.py       # NEW (Phase 3): FailureGuidedPolicy, GuidanceDiagnostics
 │
 ├── scripts/
 │   ├── collect_rollouts.py       # NEW (Phase 1): `collect --split train|holdout`, `build`
@@ -714,7 +714,7 @@ dp-manip/
 ├── tests/
 │   ├── test_failure_rollout.py   # NEW (Phase 1)
 │   ├── test_finetune.py          # NEW (Phase 2)
-│   └── test_failure_guidance.py  # NEW
+│   └── test_failure_guidance.py  # NEW (Phase 3)
 │
 └── docs/
     └── failure-aware.md          # concise implementation contract if desired
@@ -724,12 +724,13 @@ dp-manip/
 
 Do not put failure-specific branches into the baseline `DiffusionPolicy.get_action()` implementation.
 
-A small reusable primitive is acceptable, for example:
+A small reusable primitive is acceptable. Implemented (Phase 3): `get_action` is split into `observation_features` plus
 
 ```python
-def predict_noise(self, sample, timestep, obs_features):
-    return self.noise_predictor(sample, timestep, obs_features)
+def sample_actions(self, obs_features, *, generator=None, noise_fn=None): ...
 ```
+
+which owns the initial noise, the scheduler loop, RNG consumption and action slicing; `noise_fn(sample, timestep)` optionally replaces the policy's own noise prediction. `get_action` is unchanged in behavior. `FailureGuidedPolicy` samples through the baseline's `sample_actions`, so with `α = 0` it reproduces `get_action` bit for bit.
 
 The failure-specific combination logic belongs in `failure_guidance.py`.
 

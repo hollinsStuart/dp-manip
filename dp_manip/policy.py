@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import torch
 import torch.nn as nn
@@ -127,20 +127,40 @@ class DiffusionPolicy(nn.Module):
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Return ``(B, act_horizon, action_dim)`` in the environment's units."""
-        obs_features = self.observation_features(rgb, proprio)
+        return self.sample_actions(self.observation_features(rgb, proprio), generator=generator)
+
+    @torch.no_grad()
+    def sample_actions(
+        self,
+        obs_features: torch.Tensor,
+        *,
+        generator: torch.Generator | None = None,
+        noise_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Denoise one action chunk from ``(B, To, Dobs)`` observation features.
+
+        ``noise_fn(sample, timestep)`` replaces this policy's own noise
+        prediction at every denoising step; everything else (initial noise,
+        scheduler, RNG consumption, action slicing) is shared, so a wrapper that
+        returns this policy's prediction reproduces :meth:`get_action` exactly.
+        """
+        device = obs_features.device
         sample = torch.randn(
-            (rgb.shape[0], self.pred_horizon, self.action_dim),
-            device=rgb.device,
+            (obs_features.shape[0], self.pred_horizon, self.action_dim),
+            device=device,
             generator=generator,
         )
-        self.noise_scheduler.set_timesteps(self.num_inference_iters, device=rgb.device)
+        self.noise_scheduler.set_timesteps(self.num_inference_iters, device=device)
         # Unlike add_noise(), DDPMScheduler.step() does not move these tensors
         # to the sample device. A freshly loaded evaluation-only policy has not
         # called add_noise(), so move them explicitly before CUDA sampling.
-        self.noise_scheduler.alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(rgb.device)
-        self.noise_scheduler.one = self.noise_scheduler.one.to(rgb.device)
+        self.noise_scheduler.alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(device)
+        self.noise_scheduler.one = self.noise_scheduler.one.to(device)
         for timestep in self.noise_scheduler.timesteps:
-            prediction = self.noise_predictor(sample, timestep, obs_features)
+            if noise_fn is None:
+                prediction = self.noise_predictor(sample, timestep, obs_features)
+            else:
+                prediction = noise_fn(sample, timestep)
             sample = self.noise_scheduler.step(
                 prediction, timestep, sample, generator=generator
             ).prev_sample
