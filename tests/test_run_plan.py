@@ -290,7 +290,8 @@ class TrainerConsistencyTest(unittest.TestCase):
         # implementations of the final.pt/run.json reuse rule.
         source = (ROOT / "dp_manip" / "trainer.py").read_text(encoding="utf-8")
         self.assertIn("from .completion import RunState, completion_state", source)
-        self.assertIn("completion_state(cfg, run_dir)", source)
+        # Fine-tuning runs also pass their init record (dp_manip.finetune).
+        self.assertIn("completion_state(cfg, run_dir, finetune=finetune_record)", source)
 
 
 if __name__ == "__main__":

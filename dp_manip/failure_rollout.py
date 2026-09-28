@@ -32,6 +32,16 @@ DATASET_DIR = "datasets"
 SUMMARY = "summary.json"
 
 
+def rollout_dir_for(checkpoint: Path, task: str, train_seed: int, run_root: Path | None = None) -> Path:
+    """``<run root>/failure_aware/<task>/s<seed>`` for a baseline checkpoint.
+
+    ``<run root>`` defaults to the directory holding the checkpoint's run
+    directory (``<run root>/<run name>/checkpoints/<name>.pt``), plan §12.1.
+    """
+    root = run_root if run_root is not None else Path(checkpoint).resolve().parents[2]
+    return Path(root) / "failure_aware" / task / f"s{train_seed}"
+
+
 @dataclass(frozen=True)
 class RolloutEpisode:
     seed: int

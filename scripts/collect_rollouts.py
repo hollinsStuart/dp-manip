@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -33,8 +32,9 @@ from dp_manip.failure_rollout import (  # noqa: E402
     RolloutWriter,
     build_datasets,
     collect,
+    rollout_dir_for,
 )
-from dp_manip.metadata import git_revision  # noqa: E402
+from dp_manip.metadata import file_sha256, git_revision  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,20 +58,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def rollout_dir_for(checkpoint: Path, cfg, run_root: Path | None) -> Path:
-    # <run root>/<run name>/checkpoints/<name>.pt
-    root = run_root if run_root is not None else checkpoint.resolve().parents[2]
-    return root / "failure_aware" / cfg.task.name / f"s{cfg.train.seed}"
-
-
 def run_collect(args: argparse.Namespace) -> None:
     import torch
 
@@ -91,7 +77,9 @@ def run_collect(args: argparse.Namespace) -> None:
     policy = DiffusionPolicy.from_checkpoint(checkpoint, device)
     policy.eval()
 
-    output_dir = args.output_dir or rollout_dir_for(checkpoint_path, cfg, args.run_root)
+    output_dir = args.output_dir or rollout_dir_for(
+        checkpoint_path, cfg.task.name, cfg.train.seed, args.run_root
+    )
     raw_path = output_dir / (RAW_TRAIN if args.split == "train" else RAW_HOLDOUT)
     seeds = protocol.train_seeds() if args.split == "train" else protocol.holdout_seeds()
     quota = ClassQuota(protocol.collection.dataset_size) if args.split == "train" else None
@@ -135,7 +123,7 @@ def run_collect(args: argparse.Namespace) -> None:
             "act_horizon": cfg.policy.act_horizon,
             "source_checkpoint": {
                 "path": str(checkpoint_path),
-                "sha256": sha256_file(checkpoint_path),
+                "sha256": file_sha256(checkpoint_path),
                 "step": int(checkpoint["step"]),
                 "train_seed": cfg.train.seed,
                 "num_demos": cfg.data.num_demos,

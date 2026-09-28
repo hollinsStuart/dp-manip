@@ -697,10 +697,13 @@ dp-manip/
 │   ├── data.py                   # reuse RGBWindowDataset unchanged
 │   ├── failure_protocol.py       # NEW (Phase 1): loads and checks the protocol file
 │   ├── failure_rollout.py        # NEW (Phase 1): rollout recording, raw files, dataset build
+│   ├── finetune.py               # NEW (Phase 2): FinetuneSpec, freezing, init/seed/source checks
+│   ├── trainer.py                # Phase 2: optional `finetune=` path; baseline path unchanged
 │   └── failure_guidance.py       # NEW: FailureGuidedPolicy
 │
 ├── scripts/
 │   ├── collect_rollouts.py       # NEW (Phase 1): `collect --split train|holdout`, `build`
+│   ├── finetune_dp.py            # NEW (Phase 2): thin CLI over trainer.run_training
 │   └── eval_failure_guided.py    # NEW
 │
 ├── configs/
@@ -710,6 +713,7 @@ dp-manip/
 │
 ├── tests/
 │   ├── test_failure_rollout.py   # NEW (Phase 1)
+│   ├── test_finetune.py          # NEW (Phase 2)
 │   └── test_failure_guidance.py  # NEW
 │
 └── docs/

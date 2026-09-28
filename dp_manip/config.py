@@ -318,17 +318,22 @@ _HISTORICAL_VALUES: dict[tuple[str, str], Any] = {
 }
 
 
-def from_recorded(raw: dict[str, Any]) -> Config:
+def from_recorded(raw: dict[str, Any], overrides: Sequence[str] = ()) -> Config:
     """Rebuild the config of a recorded run (checkpoint, resume.pt or run.json).
 
     Unlike :func:`from_dict`, fields added after the run was recorded are filled
     with the values that run actually used, so older artifacts stay loadable.
+    ``overrides`` (``section.key=value``) are applied afterwards; fine-tuning
+    uses them to start from a baseline checkpoint's exact config.
     """
     raw = _adapt_legacy_config(raw)
     for (section, key), value in _HISTORICAL_VALUES.items():
         values = raw.get(section)
         if isinstance(values, dict) and key not in values:
             values[key] = copy.deepcopy(value)
+    for item in overrides:
+        key, value = _parse_override(item)
+        _set_dotted(raw, key, value)
     return from_dict(raw)
 
 
