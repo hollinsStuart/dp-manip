@@ -4,9 +4,34 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from typing import Protocol
 
 import numpy as np
 import torch
+
+
+class RolloutObserver(Protocol):
+    """Read-only hooks into :func:`evaluate`'s stepping loop.
+
+    Observers see exactly the arrays the policy and the metrics see and must not
+    consume policy or environment randomness, so an observed evaluation returns
+    the same per-episode results as an unobserved one.
+    """
+
+    def on_reset(self, seeds: list[int], rgb: np.ndarray, proprio: np.ndarray) -> None: ...
+
+    def on_step(
+        self,
+        actions: np.ndarray,
+        rgb: np.ndarray,
+        proprio: np.ndarray,
+        reward: np.ndarray,
+        success: np.ndarray,
+    ) -> None: ...
+
+    def on_wave_end(self, episodes: list[dict]) -> bool:
+        """Receive the finished wave's episode records; return ``True`` to stop."""
+        ...
 
 
 def _numpy(value) -> np.ndarray:
@@ -41,8 +66,14 @@ def evaluate(
     device: torch.device,
     *,
     inference_seed: int,
+    observer: RolloutObserver | None = None,
 ) -> dict:
-    """Run one fixed-length episode per seed and return per-seed metrics."""
+    """Run one fixed-length episode per seed and return per-seed metrics.
+
+    With an ``observer``, evaluation stops after any wave for which
+    ``observer.on_wave_end`` returns ``True``. The waves that did run are
+    identical to the same waves of an unobserved evaluation.
+    """
     num_envs = envs.num_envs
     if len(seeds) % num_envs:
         raise ValueError("number of seeds must be divisible by the number of environments")
@@ -58,6 +89,8 @@ def evaluate(
         chunk = list(seeds[offset : offset + num_envs])
         observation, _ = envs.reset(seed=chunk)
         rgb, proprio = _adapt_environment_observation(observation, num_envs)
+        if observer is not None:
+            observer.on_reset(chunk, rgb, proprio)
         rgb_history = np.repeat(rgb[:, None], policy.obs_horizon, axis=1)
         proprio_history = np.repeat(proprio[:, None], policy.obs_horizon, axis=1)
         success_once = np.zeros(num_envs, dtype=bool)
@@ -85,9 +118,14 @@ def evaluate(
                 proprio_history = np.concatenate(
                     (proprio_history[:, 1:], proprio[:, None]), axis=1
                 )
-                returns += _numpy(reward).reshape(num_envs)
+                step_reward = _numpy(reward).reshape(num_envs)
+                returns += step_reward
                 episode_length += 1
                 current_success = _numpy(info.get("success", np.zeros(num_envs))).reshape(num_envs).astype(bool)
+                if observer is not None:
+                    observer.on_step(
+                        action_chunks[:, action_index], rgb, proprio, step_reward, current_success
+                    )
                 success_once |= current_success
                 success_at_end = current_success
                 truncated = _numpy(truncated).reshape(num_envs).astype(bool)
@@ -97,8 +135,9 @@ def evaluate(
                     finished = True
                     break
 
+        wave: list[dict] = []
         for index, seed in enumerate(chunk):
-            episodes.append(
+            wave.append(
                 {
                     "seed": int(seed),
                     "success_once": bool(success_once[index]),
@@ -107,6 +146,9 @@ def evaluate(
                     "return": float(returns[index]),
                 }
             )
+        episodes.extend(wave)
+        if observer is not None and observer.on_wave_end(wave):
+            break
 
     if was_training:
         policy.train()

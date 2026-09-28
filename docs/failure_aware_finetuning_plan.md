@@ -260,7 +260,7 @@ Ranges already fixed by `dp-manip` (`configs/baseline.toml`, `trainer.check_data
 10000-10099     final test rollouts                     (existing; touched once, §6.4)
 20000-20999     collection rollouts -> train sets        (new)
 21000-21999     collection rollouts -> holdout sets      (new; offline gate, failure-model val loss)
-22000-22099     guidance-tuning rollouts                 (new; 22000-22049 used for alpha selection, §5.5)
+22000-22099     guidance-tuning rollouts                 (new; 22000-22047 used for alpha selection, §5.5)
 ```
 
 The exact number of used seeds may be smaller, but these ranges stay reserved for this study.
@@ -555,13 +555,13 @@ fixed:     alpha ∈ {0.5, 1.0, 2.0}
 adaptive:  alpha ∈ {0.5, 1.0, 2.0} / m
 ```
 
-where `m` is the mean of `(1 − c_k)/2` over all denoising steps, measured in a **success-blind dry run**: 10 guidance-tuning episodes (seeds 22000–22009) of checkpoint seed 1, logging cosines only. `m` is computed once per task, recorded, and never re-estimated after success rates are seen. The adaptive arm then spans the same mean λ as the fixed arm.
+where `m` is the mean of `(1 − c_k)/2` over all denoising steps, measured in a **success-blind dry run**: 8 guidance-tuning episodes (seeds 22000–22007) of checkpoint seed 1, logging cosines only. `m` is computed once per task, recorded, and never re-estimated after success rates are seen. The adaptive arm then spans the same mean λ as the fixed arm.
 
-**Tuning set:** seeds 22000–22049 (50 episodes) per checkpoint, pooled over checkpoints 1–3 (150 episodes per α). Spreading the tuning episodes over checkpoints keeps α from being fitted to one checkpoint; 50 per checkpoint is what the 24 GPU-hour budget allows (§10). The 50-episode validation range 5000–5049 is not used: it is already consumed by task selection.
+**Tuning set:** seeds 22000–22047 (48 episodes) per checkpoint, pooled over checkpoints 1–3 (144 episodes per α). Spreading the tuning episodes over checkpoints keeps α from being fitted to one checkpoint; 48 per checkpoint is what the 24 GPU-hour budget allows (§10), and a multiple of `num_envs = 4` as `evaluate` requires. The 50-episode validation range 5000–5049 is not used: it is already consumed by task selection.
 
 **Selection rule** (pre-registered):
 
-1. For each arm, pool tuning episodes over checkpoints 1–3 (150 episodes per α).
+1. For each arm, pool tuning episodes over checkpoints 1–3 (144 episodes per α).
 2. Pick the α with the highest pooled `success_once`; ties within 2 episodes go to the **smaller** α. If the winner is at the edge of the grid, report that; the grid is not extended.
 3. The same selected α is used for all checkpoints of that arm.
 4. F vs A: the arm whose selected α has the higher pooled tuning success becomes "the guidance arm" for H1/H2 and fixes C1's guidance mode; ties go to F (the simpler one).
@@ -608,7 +608,7 @@ All arms must use:
 
 - the same success-policy checkpoint within each pair;
 - the same environment configuration (`physx_cpu`, `num_envs`, `max_episode_steps` from `configs/tasks/`);
-- the same test seeds 10000–10099 and tuning seeds 22000–22049;
+- the same test seeds 10000–10099 and tuning seeds 22000–22047;
 - the same inference seed (0) and the same RNG consumption per step, so that arms differ only through the guided `ε` (checked by the `α = 0` test in §8);
 - the same observation history and action horizon.
 
@@ -621,8 +621,8 @@ Do not modify the test set while tuning.
 | 5000–5049 | task selection only (baseline-track results) |
 | 21000–21049 holdout rollouts | lr/steps pilot (checkpoint 1 only, offline, §4.4) |
 | 21050–21099 holdout rollouts | offline gate (§6.7), failure/success-model val loss |
-| 22000–22009 | success-blind cosine dry run (`m`, §5.5) |
-| 22000–22049 | α selection and F-vs-A choice |
+| 22000–22007 | success-blind cosine dry run (`m`, §5.5) |
+| 22000–22047 | α selection and F-vs-A choice |
 | 10000–10099 | one final evaluation per (arm, checkpoint) after everything above is frozen |
 
 Test evaluation happens once. No arm, α, K, checkpoint seed or failure-model checkpoint is changed after test results are seen.
@@ -693,26 +693,23 @@ Failure rollouts depend on a trained Diffusion Policy checkpoint, so failure-awa
 dp-manip/
 ├── dp_manip/
 │   ├── policy.py                 # existing; only minimal reusable API changes
-│   ├── evaluate.py               # reuse
-│   ├── data.py                   # reuse RGBWindowDataset where possible
-│   ├── failure_rollout.py        # NEW: closed-loop failure collection
-│   ├── failure_guidance.py       # NEW: FailureGuidedPolicy
-│   └── failure_data.py           # NEW only if failure-specific IO is necessary
+│   ├── evaluate.py               # reuse; read-only RolloutObserver hook (Phase 1)
+│   ├── data.py                   # reuse RGBWindowDataset unchanged
+│   ├── failure_protocol.py       # NEW (Phase 1): loads and checks the protocol file
+│   ├── failure_rollout.py        # NEW (Phase 1): rollout recording, raw files, dataset build
+│   └── failure_guidance.py       # NEW: FailureGuidedPolicy
 │
 ├── scripts/
-│   ├── collect_failures.py       # NEW
-│   ├── eval_failure_guided.py    # NEW
-│   └── inspect_failure_data.py   # optional
+│   ├── collect_rollouts.py       # NEW (Phase 1): `collect --split train|holdout`, `build`
+│   └── eval_failure_guided.py    # NEW
 │
 ├── configs/
-│   ├── experiments/
-│   │   └── failure_aware.toml    # NEW: task-agnostic protocol (§12.1)
 │   └── failure_aware/
+│       ├── protocol.toml         # NEW (Phase 1): task-agnostic protocol (§12.1)
 │       └── peginsertionside.toml # NEW: per-task lock file (§12.2); plugcharger.toml later
 │
 ├── tests/
-│   ├── test_failure_rollout.py   # NEW
-│   ├── test_failure_data.py      # NEW if separate data module exists
+│   ├── test_failure_rollout.py   # NEW (Phase 1)
 │   └── test_failure_guidance.py  # NEW
 │
 └── docs/
@@ -761,7 +758,7 @@ Keep this branch limited to failure-aware work.
 Implement:
 
 ```text
-collect_failures.py
+collect_rollouts.py
 failure_rollout.py
 HDF5 / JSON writer
 provenance metadata
@@ -853,7 +850,7 @@ Integrate:
 
 Acceptance criteria:
 
-1. All arms of §6.1 run on the same tuning seeds (22000–22049) and test seeds (10000–10099).
+1. All arms of §6.1 run on the same tuning seeds (22000–22047) and test seeds (10000–10099).
 2. The dry-run `m`, the α grids, and the selected α per arm are recorded before any test run.
 3. Test evaluation cannot silently use a different success checkpoint or failure checkpoint.
 4. Result files record both checkpoint paths/hashes and the guidance mode.
@@ -935,19 +932,19 @@ Everything below assumes the worst-case episode length (PegInsertionSide, 300 st
 | lr/steps pilot (checkpoint 1) | — | 1.6 | 1.6 | 2 runs × 20k steps; the chosen one is reused as checkpoint 1's failure model |
 | Remaining fine-tunes | — | 2.0 | 4.0 | 5 runs (ckpt 1 success; ckpt 2–3 failure + success) at 10k or 20k steps |
 | `α = 0` reproduction check | 20 (20) | 0.1 | 0.1 | §8 |
-| Dry run for `m` | 10 (10) | 0.05 | 0.05 | checkpoint 1 |
-| Tuning: F, A, C1 × 3 α × 50 eps × 3 ckpts | 1,350 (1,350) | 5.4 | 5.4 | §5.5 |
+| Dry run for `m` | 8 (8) | 0.05 | 0.05 | checkpoint 1 |
+| Tuning: F, A, C1 × 3 α × 48 eps × 3 ckpts | 1,296 (1,296) | 5.2 | 5.2 | §5.5 |
 | Test: F, A, C1 × 3 ckpts × 100 | 900 (900) | 3.6 | 3.6 | |
 | Test: C2 × 3 ckpts × 100 | 300 (0) | 0.75 | 0.75 | |
 | Test: B × 3 ckpts × 100 | 300 (0) | 0 | 0.75 | reused from the main track if the `α = 0` check passes; otherwise rerun |
-| **Total** | | **≈ 17.3** | **≈ 21.6** | reserve 2.4–6.7 GPU-h for failed or preempted jobs |
+| **Total** | | **≈ 17.1** | **≈ 21.4** | reserve 2.6–6.9 GPU-h for failed or preempted jobs |
 
 ### 10.3 If the re-projection exceeds 24 GPU-hours
 
 After step 2 of Phase 5, recompute §10.2 with the measured rollout cost. If the worst case exceeds 24 GPU-hours, apply these cuts **in order**, only as far as needed, and record them in §11 before continuing:
 
 1. Holdout rollouts 100 → 60 per checkpoint (pilot 21000–21029, gate 21030–21059).
-2. Tuning 50 → 30 episodes per checkpoint (90 pooled per α).
+2. Tuning 48 → 28 episodes per checkpoint (84 pooled per α).
 3. Drop C2 from the test set (the self-imitation question is then reported as not tested).
 4. Drop the losing F/A arm from the test set (H3 is then reported from tuning episodes only, descriptively, with no claim).
 
@@ -958,6 +955,10 @@ Never cut: the 3 checkpoints, 100 test episodes per (arm, checkpoint), and the a
 ## 11. Locked Parameters (2026-09-28)
 
 Fixed before any failure-aware run. Changing any of them after tuning or test results exist invalidates the pre-registration; a change made before that is recorded here with its date and reason.
+
+Change log (all before any failure-aware run):
+
+- 2026-09-28 — guidance tuning 50 → **48** episodes per checkpoint and the `m` dry run 10 → **8** episodes. `evaluate` runs full waves of `eval.num_envs = 4` episodes; 50 and 10 are not multiples of 4. The machine-readable values live in `configs/failure_aware/protocol.toml`, and `FailureProtocol.check_against` rejects counts that do not divide `num_envs`.
 
 | # | Parameter | Value | Section |
 | --- | --- | --- | --- |
@@ -986,7 +987,7 @@ Defaults (no discussion needed, listed so they are not changed silently):
 | C1 guidance mode | the tuning-set winner of F vs A; ties → F |
 | α tie-break | within 2 pooled tuning episodes → smaller α |
 | Evaluation `num_envs` | 4 for every rollout (required by the `α = 0` check) |
-| Episodes | tuning 50 per checkpoint; test 100 per checkpoint (10000–10099) |
+| Episodes | tuning 48 per checkpoint; test 100 per checkpoint (10000–10099) |
 | Failure types | automatic 3-way classification for all test episodes; PegInsertionSide stage subtypes from videos, 5 episodes per class per arm |
 | Offline gate | fixed noise/timestep seed, all windows of holdout 21050–21099; pass iff `gap_fail > gap_succ` on all 3 checkpoints |
 | Prerequisite | main-track PegInsertionSide `unet_n100` seeds 1–5 (and `unet_n200` if §1 falls back to it) `final.pt` and their validation rollouts are finished |
@@ -1010,7 +1011,7 @@ No PlugCharger run is part of the current study. This section fixes what the Peg
   ```
 
 - **Two config layers.**
-  - `configs/experiments/failure_aware.toml` — task-agnostic protocol: arms, α grids, K, rollout cap, truncation factor 1.5, pilot grid, tuning/test episode counts, seed ranges.
+  - `configs/failure_aware/protocol.toml` — task-agnostic protocol (not under `configs/experiments/`, whose files are experiment-grid specs): arms, α grids, K, rollout cap, truncation factor 1.5, pilot grid, tuning/test episode counts, seed ranges.
   - `configs/failure_aware/<task>.toml` — per-task **lock file**, filled stage by stage and never edited after the stage that fills it:
 
   ```toml
@@ -1041,7 +1042,7 @@ Default extension design: a **reduced replication with transferred hyperparamete
 | K, rollout cap, truncation factor, seed ranges, episode counts | same as PegInsertionSide |
 | `L_fail` | re-derived from PlugCharger's own success lengths |
 | Fine-tune lr and steps | transferred from the PegInsertionSide lock file (no pilot) |
-| `m` | re-measured (10-episode success-blind dry run) |
+| `m` | re-measured (8-episode success-blind dry run) |
 | Guidance arm (F or A) | transferred |
 | α | the selected grid value from `{0.5, 1, 2}` is transferred; the adaptive arm divides it by PlugCharger's own `m`; C1's grid value is transferred the same way |
 | Offline gate | re-run on PlugCharger's holdout |
