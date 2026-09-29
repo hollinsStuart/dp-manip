@@ -249,8 +249,19 @@ def run_training(
         if init_checkpoint is not None
         else compute_normalization(train_info)
     )
-    train_dataset = RGBWindowDataset(train_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon)
-    val_dataset = RGBWindowDataset(val_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon)
+    preload_start = time.time()
+    train_dataset = RGBWindowDataset(
+        train_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
+    )
+    val_dataset = RGBWindowDataset(
+        val_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
+    )
+    if cfg.data.preload:
+        preloaded_gb = (train_dataset.preloaded_bytes + val_dataset.preloaded_bytes) / 2**30
+        print(
+            f"preloaded {len(train_info.episodes)} train + {len(val_info.episodes)} val episodes "
+            f"in {time.time() - preload_start:.1f} s ({preloaded_gb:.3f} GiB)"
+        )
     experiment = run_name or config_lib.default_run_name(cfg)
     run_dir = output_root.expanduser().resolve() / experiment
     checkpoint_dir = run_dir / "checkpoints"

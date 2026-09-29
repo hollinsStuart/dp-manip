@@ -54,6 +54,53 @@ class Hdf5AdapterTest(unittest.TestCase):
             )
             dataset.close()
 
+    def test_preload_matches_lazy_reads_bitwise(self) -> None:
+        rng = np.random.default_rng(0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "demo.h5"
+            episodes = []
+            with h5py.File(path, "w") as file:
+                for episode_id, length in enumerate((5, 9)):
+                    trajectory = file.create_group(f"traj_{episode_id}")
+                    observations = trajectory.create_group("obs_rgb")
+                    # Same layout as the exporter: gzip, chunks spanning several frames.
+                    observations.create_dataset(
+                        "rgb",
+                        data=rng.integers(0, 256, (length + 1, 8, 8, 6), dtype=np.uint8),
+                        chunks=(3, 4, 4, 2),
+                        compression="gzip",
+                        compression_opts=5,
+                    )
+                    observations.create_dataset(
+                        "state", data=rng.standard_normal((length + 1, 3)).astype(np.float32)
+                    )
+                    trajectory.create_dataset(
+                        "actions", data=rng.standard_normal((length, 2)).astype(np.float32)
+                    )
+                    episodes.append({"episode_id": episode_id, "episode_seed": 100 + episode_id})
+            metadata = {
+                "env_info": {
+                    "env_id": "PickCube-v1",
+                    "env_kwargs": {"control_mode": "pd_ee_delta_pos"},
+                },
+                "episodes": episodes,
+            }
+            path.with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
+
+            info = read_dataset_info(path)
+            lazy = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4)
+            preloaded = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4, preload=True)
+            self.assertEqual(len(lazy), len(preloaded))
+            for item in range(len(lazy)):
+                expected, actual = lazy[item], preloaded[item]
+                self.assertEqual(set(expected), set(actual))
+                for key in expected:
+                    self.assertEqual(expected[key].dtype, actual[key].dtype)
+                    np.testing.assert_array_equal(expected[key], actual[key])
+            # Preloaded windows never open the HDF5 file.
+            self.assertIsNone(preloaded._file)
+            lazy.close()
+
 
 if __name__ == "__main__":
     unittest.main()

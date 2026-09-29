@@ -18,9 +18,10 @@ from typing import Any
 from .config import Config, ExperimentSpec, match_experiment_value
 
 
-# A replicate seed and the dataset root are runtime metadata, not controls.
+# A replicate seed, the dataset root and whether RGB is preloaded (the samples
+# are bit-identical either way) are runtime metadata, not controls.
 SEED_KEY = "train.seed"
-RUNTIME_KEYS = frozenset({"data.root"})
+RUNTIME_KEYS = frozenset({"data.root", "data.preload"})
 
 # Architecture definitions of the three arms (docs/final-plan.md §6). They may
 # differ only inside the backbone experiment, where they belong to the declared

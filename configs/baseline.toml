@@ -6,6 +6,10 @@ shader_pack = "minimal"
 root = "data/dataset"
 num_demos = 100
 val_num_demos = 50
+# Runtime switch, not a control: true decodes the RGB of the selected episodes
+# into RAM once (about 15 MB per demo) so DataLoader workers stop spending CPU
+# on gzip. Enable it per run with --set data.preload=true.
+preload = false
 
 [vision]
 feature_dim = 128

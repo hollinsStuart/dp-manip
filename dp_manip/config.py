@@ -28,6 +28,10 @@ class DataConfig:
     val_path: str
     num_demos: int
     val_num_demos: int
+    # Decode the selected episodes into RAM before training instead of
+    # decompressing gzip chunks per window. Runtime only: the samples are
+    # bit-identical either way, so it is not part of the control hash.
+    preload: bool
 
 
 @dataclass
@@ -130,6 +134,8 @@ class Config:
             or self.data.val_num_demos < 1
         ):
             raise ValueError("data.val_num_demos must be positive")
+        if not isinstance(self.data.preload, bool):
+            raise ValueError("data.preload must be a boolean")
         policy = self.policy
         if not isinstance(policy.backbone, str) or not policy.backbone:
             raise ValueError("policy.backbone must be a non-empty string")
@@ -313,6 +319,8 @@ _HISTORICAL_VALUES: dict[tuple[str, str], Any] = {
     ("policy", "mlp_layers"): 3,
     ("policy", "mlp_time_embed_dim"): 128,
     ("policy", "mlp_obs_feat_dim"): 256,
+    # Before data.preload existed every run read RGB windows lazily from HDF5.
+    ("data", "preload"): False,
     # Before Phase 17 the trainer hard-coded AdamW betas (0.95, 0.999).
     ("train", "betas"): [0.95, 0.999],
 }

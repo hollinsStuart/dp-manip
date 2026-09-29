@@ -238,17 +238,36 @@ values = [10]
         for key in [key for key in recorded["policy"] if key.startswith(("transformer_", "mlp_"))]:
             del recorded["policy"][key]
         del recorded["policy"]["backbone"]
+        # Every run before data.preload existed read RGB lazily.
+        del recorded["data"]["preload"]
 
         restored = from_recorded(recorded)
         # These are the values those runs actually trained with, which match
         # today's baseline, so an old resume.pt still equals a fresh config.
         self.assertEqual(restored.train.betas, [0.95, 0.999])
         self.assertEqual(restored.policy.backbone, "unet")
+        self.assertFalse(restored.data.preload)
         self.assertEqual(restored.to_dict(), current)
 
         # Fresh configs get no such help: baseline.toml is the only source.
         with self.assertRaisesRegex(ValueError, "missing .* required positional argument"):
             from_dict(recorded)
+
+    def test_preload_is_runtime_metadata_not_a_control(self) -> None:
+        from dp_manip.invariants import RUNTIME_KEYS, SEED_KEY, control_hash
+
+        lazy = load(TASKS / "pickcube.toml")
+        preloaded = load(TASKS / "pickcube.toml", ["data.preload=true"])
+        self.assertFalse(lazy.data.preload)
+        self.assertTrue(preloaded.data.preload)
+        keys = {SEED_KEY, *RUNTIME_KEYS}
+        self.assertEqual(control_hash(lazy, keys), control_hash(preloaded, keys))
+        # Runs recorded before the field existed keep their control hash.
+        recorded = lazy.to_dict()
+        del recorded["data"]["preload"]
+        self.assertEqual(control_hash(from_recorded(recorded), keys), control_hash(lazy, keys))
+        with self.assertRaisesRegex(ValueError, "data.preload"):
+            load(TASKS / "pickcube.toml", ['data.preload="yes"'])
 
     def test_fresh_config_missing_a_baseline_value_is_rejected(self) -> None:
         text = BASELINE.read_text(encoding="utf-8")

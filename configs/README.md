@@ -70,8 +70,13 @@ checkpoint、`resume.pt`、`run.json` 时用 `config.from_recorded`：对后来�
 集群上可用 `--data-root` 覆盖数据根目录。临时 smoke 可用
 `--set train.total_iters=...`；正式实验仍使用 baseline 的固定训练预算。
 
+新实验可加 `--set data.preload=true`：训练开始前把所选 episode 的 RGB 一次性解码进内存
+（每条 demo 约 15 MB，train 和 val 都会加载），DataLoader worker 不再逐窗口解压 gzip。
+默认 `false`，即原来的逐窗口懒读。读出的样本逐位相同，所以它和 `data.root` 一样属于运行时
+字段，不进 `control_hash`，也不算 drift；但同一个 run 续跑（resume）时要保持同样的取值。
+
 提交正式实验前，用 `scripts/check_experiment.py` 自动做 Gate B 检查：它解析 spec 声明的
-所有 `(value, seed)` cell，只允许声明的实验变量、replicate seed 和运行时 `data.root` 不同；
+所有 `(value, seed)` cell，只允许声明的实验变量、replicate seed 和运行时 `data.root` / `data.preload` 不同；
 backbone 实验另外允许 `policy.unet_*` / `policy.transformer_*` / `policy.mlp_*` 结构参数不同
 （计划中的 `policy.backbone.*`），data-size 等其他实验里这些结构参数也必须一致。其余差异以
 per-key 矩阵报错并返回非零状态；同时按 Phase 13/§19 输出每个任务的 `control_hash`（同一矩阵的

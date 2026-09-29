@@ -1,8 +1,10 @@
 """Lazy RGB trajectory loading for the ``maniskill-demogen`` export schema.
 
-Only low-dimensional observations and actions are scanned eagerly. Compressed
-RGB frames remain in HDF5 and are read by DataLoader workers per temporal
-window, keeping large demonstration sets from consuming several GB of RAM.
+Only low-dimensional observations and actions are scanned eagerly. By default
+compressed RGB frames remain in HDF5 and are read by DataLoader workers per
+temporal window, keeping large demonstration sets from consuming several GB of
+RAM. With ``preload=True`` the selected episodes are decoded into RAM once;
+every chunk is then decompressed a single time instead of once per window.
 """
 
 from __future__ import annotations
@@ -241,10 +243,19 @@ def compute_normalization(info: DatasetInfo, epsilon: float = 1e-3) -> Normaliza
     )
 
 
-class RGBWindowDataset(Dataset):
-    """Episode-local observation/action windows with repeated boundary padding."""
+# Per-episode arrays a window is read from, as HDF5 paths inside ``traj_<i>``.
+EPISODE_KEYS = ("obs_rgb/rgb", "obs_rgb/state", "actions")
 
-    def __init__(self, info: DatasetInfo, obs_horizon: int, pred_horizon: int):
+
+class RGBWindowDataset(Dataset):
+    """Episode-local observation/action windows with repeated boundary padding.
+
+    ``preload`` decodes every selected episode into RAM up front. Windows are
+    bit-identical to lazy reads; build the dataset before DataLoader workers
+    fork so they share the arrays copy-on-write instead of copying them.
+    """
+
+    def __init__(self, info: DatasetInfo, obs_horizon: int, pred_horizon: int, *, preload: bool = False):
         self.info = info
         self.obs_horizon = obs_horizon
         self.pred_horizon = pred_horizon
@@ -254,9 +265,24 @@ class RGBWindowDataset(Dataset):
             for timestep in range(episode.length)
         ]
         self._file: h5py.File | None = None
+        self._episodes: list[dict[str, np.ndarray]] | None = None
+        if preload:
+            # Whole-episode reads decompress each chunk once.
+            with h5py.File(info.path, "r") as file:
+                self._episodes = [
+                    {key: file[episode.group][key][()] for key in EPISODE_KEYS}
+                    for episode in info.episodes
+                ]
 
     def __len__(self) -> int:
         return len(self.index)
+
+    @property
+    def preloaded_bytes(self) -> int:
+        """Bytes held in RAM by ``preload`` (0 for lazy reads)."""
+        if self._episodes is None:
+            return 0
+        return sum(array.nbytes for arrays in self._episodes for array in arrays.values())
 
     def _handle(self) -> h5py.File:
         if self._file is None:
@@ -264,7 +290,7 @@ class RGBWindowDataset(Dataset):
         return self._file
 
     @staticmethod
-    def _read_frames(dataset: h5py.Dataset, indices: np.ndarray) -> np.ndarray:
+    def _read_frames(dataset: h5py.Dataset | np.ndarray, indices: np.ndarray) -> np.ndarray:
         lower, upper = int(indices.min()), int(indices.max())
         block = dataset[lower : upper + 1]
         return np.asarray(block[indices - lower])
@@ -272,7 +298,11 @@ class RGBWindowDataset(Dataset):
     def __getitem__(self, item: int) -> dict[str, np.ndarray]:
         episode_index, timestep = self.index[item]
         episode = self.info.episodes[episode_index]
-        group = self._handle()[episode.group]
+        group = (
+            self._episodes[episode_index]
+            if self._episodes is not None
+            else self._handle()[episode.group]
+        )
 
         obs_indices = np.arange(timestep - self.obs_horizon + 1, timestep + 1)
         obs_indices = np.clip(obs_indices, 0, episode.length)
