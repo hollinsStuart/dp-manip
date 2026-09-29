@@ -278,6 +278,9 @@ def run_training(
     if finished.state is RunState.COMPLETED:
         print(f"{experiment}: final checkpoint already exists; nothing to do")
         return 0
+    # Decided before the directories below are created, so --resume never
+    # accepts a fresh run directory and rejects only earlier content.
+    had_content = run_dir.is_dir() and any(run_dir.iterdir())
     run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -343,7 +346,7 @@ def run_training(
                 "will not match a continuous run"
             )
         print(f"resuming {experiment} from optimizer step {start_step}")
-    elif resume == "never" and any(run_dir.iterdir()):
+    elif resume == "never" and had_content:
         raise FileExistsError(f"{run_dir} is not empty")
 
     sampler = StepSeededIndexSampler(

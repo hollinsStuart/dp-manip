@@ -148,6 +148,21 @@ class CheckpointLifecycleTest(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 run_training(cfg, output_root=output_root, device="cpu")
 
+    def test_resume_never_accepts_only_a_fresh_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = smoke_config(root / "data")
+            output_root = root / "runs"
+            # A fresh directory trains, although the trainer creates checkpoints/ itself.
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu", resume="never"), 0)
+
+            # Leftovers from an interrupted run (no final.pt) are rejected, not resumed.
+            run_dir = output_root / config_lib.default_run_name(cfg)
+            (run_dir / "checkpoints" / "final.pt").unlink()
+            (run_dir / "checkpoints" / "resume.pt").unlink()
+            with self.assertRaisesRegex(FileExistsError, "is not empty"):
+                run_training(cfg, output_root=output_root, device="cpu", resume="never")
+
 
 if __name__ == "__main__":
     unittest.main()
