@@ -414,6 +414,8 @@ failure-dataset seed validation
 
 A thin CLI wrapper is acceptable, but it should still call the same trainer implementation.
 
+**Data loading.** Fine-tuning runs with `data.preload = true` (set by `finetune.rollout_overrides`): the rollout sets are decoded into RAM once instead of re-inflating gzip chunks per window, which otherwise saturates the DataLoader workers. The offline pilot and gate losses (`denoising_loss`, §6.7) preload their holdout sets the same way. Windows are bit-identical to lazy reads, so this changes speed only, never results; `--set data.preload=false` restores lazy reads. `data.preload` is runtime metadata, outside the control hash.
+
 ---
 
 ## 5. Failure Guidance Algorithm
@@ -694,7 +696,7 @@ dp-manip/
 ├── dp_manip/
 │   ├── policy.py                 # Phase 3: get_action -> observation_features + sample_actions
 │   ├── evaluate.py               # reuse; read-only RolloutObserver hook (Phase 1)
-│   ├── data.py                   # reuse RGBWindowDataset unchanged
+│   ├── data.py                   # reuse RGBWindowDataset; `preload` option, on for fine-tuning (§4.5)
 │   ├── failure_protocol.py       # NEW (Phase 1): loads and checks the protocol file
 │   ├── failure_rollout.py        # NEW (Phase 1): rollout recording, raw files, dataset build
 │   ├── finetune.py               # NEW (Phase 2): FinetuneSpec, freezing, init/seed/source checks
@@ -989,6 +991,7 @@ Fixed before any failure-aware run. Changing any of them after tuning or test re
 Change log (all before any failure-aware run):
 
 - 2026-09-28 — guidance tuning 50 → **48** episodes per checkpoint and the `m` dry run 10 → **8** episodes. `evaluate` runs full waves of `eval.num_envs = 4` episodes; 50 and 10 are not multiples of 4. The machine-readable values live in `configs/failure_aware/protocol.toml`, and `FailureProtocol.check_against` rejects counts that do not divide `num_envs`.
+- 2026-09-30 — `protocol.toml` gained `[evaluation] test_episodes = 100`: the number of leading test seeds per (arm, checkpoint). 100 is the whole recorded test range (10000–10099), so the study's test set is unchanged; the field exists so the smoke protocol can use 8. This changes the protocol file's sha256, which is harmless because no lock file or rollout existed yet. Also: a non-study (smoke) protocol must use its own `--lock` and `--rollout-root`, and fine-tuning plus the offline losses preload their data (§4.5; speed only, no effect on results).
 
 | # | Parameter | Value | Section |
 | --- | --- | --- | --- |
