@@ -4,7 +4,9 @@
 # The QOS allows one submitted job per user, so every step is its own job and
 # the arguments name the step. Steps are idempotent: collection refuses to
 # overwrite raw rollouts, fine-tuning resumes from resume.pt, and closed-loop
-# evaluation skips results that already exist. Submit from the repository root:
+# evaluation skips results that already exist. Submit from the repository root.
+# Usually the whole study is driven by scripts/failure_pipeline.py (see its
+# docstring for the smoke and study commands); single steps also work:
 #
 #   sbatch slurm/failure_aware.sbatch scripts/collect_rollouts.py collect "$RUN_ROOT/peginsertionside_rgb_unet_n100_s1/checkpoints/final.pt" --split train
 #   sbatch slurm/failure_aware.sbatch scripts/finetune_dp.py "$CKPT" --label failure --lr 1e-5 --steps 20000 --checkpoint-steps 5000 10000
@@ -29,7 +31,7 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 case "$1" in
-  scripts/collect_rollouts.py | scripts/finetune_dp.py | scripts/failure_study.py) ;;
+  scripts/failure_pipeline.py | scripts/collect_rollouts.py | scripts/finetune_dp.py | scripts/failure_study.py) ;;
   *)
     echo "refusing to run $1: expected a failure-aware study script" >&2
     exit 2

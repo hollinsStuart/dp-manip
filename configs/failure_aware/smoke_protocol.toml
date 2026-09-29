@@ -1,0 +1,40 @@
+# Cluster smoke run of the failure-aware pipeline (not a study).
+#
+# Same structure and seed ranges as protocol.toml, scaled down to exercise every
+# stage on real ManiSkill in well under one GPU-hour: one checkpoint, K = 4,
+# short fine-tunes, a two-value alpha grid and 8 test episodes per arm. It must
+# run with its own --lock and --rollout-root so nothing touches the study's
+# lock file or rollout directories (scripts/failure_pipeline.py enforces this).
+
+[seeds]
+collection_train = [20000, 21000]
+collection_holdout = [21000, 22000]
+guidance_tuning = [22000, 23000]
+
+[collection]
+dataset_size = 4
+rollout_cap = 16
+holdout_episodes = 8
+pilot_holdout_episodes = 4
+failure_truncation_factor = 1.5
+low_success_min = 1
+
+[baseline_cell]
+min_val_success = 0.15
+max_val_success = 0.85
+val_seeds = [1, 2, 3, 4, 5]
+checkpoint_seeds = [1]
+
+[pilot]
+learning_rates = [1e-5, 1e-4]
+steps = [100, 200]
+relative_tie = 0.05
+
+[guidance]
+alpha_grid = [0.5, 1.0]
+dry_run_episodes = 4
+tuning_episodes = 4
+tie_episodes = 0
+
+[evaluation]
+test_episodes = 8

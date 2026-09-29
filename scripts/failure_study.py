@@ -58,6 +58,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     cell = command("select-cell", "apply the baseline cell rule (plan §1)")
     cell.add_argument("--run-root", type=Path, required=True, help="main-track run root")
+    cell.add_argument(
+        "--rollout-root",
+        type=Path,
+        help="root of failure_aware/<task>/s<seed>/ (default: the run root); a smoke run uses a scratch root",
+    )
     collection = command("record-collection", "lock one checkpoint's built datasets")
     collection.add_argument("--seed", type=int, required=True)
     command("pilot", "choose lr/steps from the offline pilot (plan §4.4)", torch_device=True)
@@ -121,6 +126,7 @@ def select_cell(args, lock: LockFile, protocol: FailureProtocol) -> None:
             "val_success_n100": n100,
             "val_success_n200": n200,
             "protocol_sha256": protocol.sha256,
+            "rollout_root": str(args.rollout_root.resolve()) if args.rollout_root else None,
         },
     )
     lock.write("checkpoints", checkpoints)
@@ -371,7 +377,7 @@ def evaluate_arms(args, lock: LockFile, protocol: FailureProtocol, envs_factory:
     grid = [None] if args.split == "test" else (args.grid_values or list(protocol.guidance.alpha_grid))
     for seed in seeds:
         cfg = baseline_config(lock, seed)
-        episode_seeds = study.tuning_seeds(protocol) if args.split == "tuning" else cfg.test_seeds()
+        episode_seeds = study.tuning_seeds(protocol) if args.split == "tuning" else protocol.test_seeds(cfg)
         for grid_value in grid:
             spec = study.resolve_arm(lock, protocol, arm=args.arm, split=args.split, seed=seed, grid_value=grid_value)
             output = study.eval_output_path(lock, spec)

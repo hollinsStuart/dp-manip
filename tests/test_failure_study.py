@@ -198,6 +198,8 @@ alpha_grid = [0.5, 1.0]
 dry_run_episodes = 4
 tuning_episodes = 4
 tie_episodes = 0
+[evaluation]
+test_episodes = 8
 """
 
 
@@ -253,6 +255,34 @@ def write_expert(path: Path, seeds: list[int]) -> None:
     )
 
 
+def train_baselines(root: Path, run_root: Path, seeds=(1, 2)) -> dict[int, Path]:
+    """Tiny main-track baselines named like the N=100 cell, with validation results."""
+    data_root = root / "data"
+    checkpoints = {}
+    for seed in seeds:
+        cfg = config_lib.load(
+            str(ROOT / "configs" / "tasks" / f"{TASK}.toml"),
+            [
+                f"data.root={json.dumps(str(data_root))}",
+                "data.num_demos=4", "data.val_num_demos=1",
+                "vision.feature_dim=8", "policy.unet_dims=[16, 32]", "policy.kernel_size=3",
+                "policy.n_groups=4", "diffusion.num_diffusion_iters=4", "diffusion.num_inference_iters=4",
+                "train.total_iters=2", "train.batch_size=2", "train.num_workers=0", "train.log_freq=100",
+                "train.validation_steps=[2]", "train.checkpoint_steps=[]", "train.amp=false",
+                "ema.decay=0.9", "eval.num_envs=2", "eval.test_episodes=8", f"train.seed={seed}",
+            ],
+        )
+        if not (data_root / cfg.data.train_path).is_file():
+            write_expert(data_root / cfg.data.train_path, [0, 1, 2, 3])
+            write_expert(data_root / cfg.data.val_path, [4000])
+        name = f"{TASK}_rgb_unet_n100_s{seed}"
+        assert run_training(cfg, output_root=run_root, run_name=name, device="cpu") == 0
+        (run_root / name / "eval").mkdir()
+        (run_root / name / "eval" / "val_final.json").write_text(json.dumps({"summary": {"success_once": 0.4}}))
+        checkpoints[seed] = run_root / name / "checkpoints" / "final.pt"
+    return checkpoints
+
+
 @unittest.skipUnless(HAVE_TORCH, "requires the cluster torch environment")
 class StudyEndToEndTest(unittest.TestCase):
     def test_full_study_on_synthetic_data(self) -> None:
@@ -275,30 +305,7 @@ class StudyEndToEndTest(unittest.TestCase):
         def locked(section: str):
             return LockFile(lock_path).get(section)
 
-        # Main-track baselines (two checkpoint seeds) and their validation results.
-        data_root = root / "data"
-        checkpoints = {}
-        for seed in (1, 2):
-            cfg = config_lib.load(
-                str(ROOT / "configs" / "tasks" / f"{TASK}.toml"),
-                [
-                    f"data.root={json.dumps(str(data_root))}",
-                    "data.num_demos=4", "data.val_num_demos=1",
-                    "vision.feature_dim=8", "policy.unet_dims=[16, 32]", "policy.kernel_size=3",
-                    "policy.n_groups=4", "diffusion.num_diffusion_iters=4", "diffusion.num_inference_iters=4",
-                    "train.total_iters=2", "train.batch_size=2", "train.num_workers=0", "train.log_freq=100",
-                    "train.validation_steps=[2]", "train.checkpoint_steps=[]", "train.amp=false",
-                    "ema.decay=0.9", "eval.num_envs=2", "eval.test_episodes=8", f"train.seed={seed}",
-                ],
-            )
-            if seed == 1:
-                write_expert(data_root / cfg.data.train_path, [0, 1, 2, 3])
-                write_expert(data_root / cfg.data.val_path, [4000])
-            name = f"{TASK}_rgb_unet_n100_s{seed}"
-            self.assertEqual(run_training(cfg, output_root=run_root, run_name=name, device="cpu"), 0)
-            (run_root / name / "eval").mkdir()
-            (run_root / name / "eval" / "val_final.json").write_text(json.dumps({"summary": {"success_once": 0.4}}))
-            checkpoints[seed] = run_root / name / "checkpoints" / "final.pt"
+        checkpoints = train_baselines(root, run_root)
 
         stage("select-cell", "--run-root", str(run_root))
         self.assertEqual(locked("task.num_demos"), 100)

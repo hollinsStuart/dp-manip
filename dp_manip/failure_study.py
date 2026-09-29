@@ -107,8 +107,11 @@ def checkpoint_seeds(lock: LockFile) -> list[int]:
 
 
 def rollout_dir(lock: LockFile, seed: int) -> Path:
+    """``<rollout root>/failure_aware/<task>/s<seed>``; the root is locked by select-cell."""
     entry = lock.require(f"checkpoints.s{seed}", "select-cell")
-    return rollout_dir_for(Path(entry["path"]), lock.require("task", "select-cell")["name"], seed)
+    task = lock.require("task", "select-cell")
+    root = task.get("rollout_root")
+    return rollout_dir_for(Path(entry["path"]), task["name"], seed, Path(root) if root else None)
 
 
 def dataset_dir(lock: LockFile, seed: int) -> Path:

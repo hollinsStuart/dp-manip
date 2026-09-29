@@ -706,18 +706,21 @@ dp-manip/
 ├── scripts/
 │   ├── collect_rollouts.py       # NEW (Phase 1): `collect --split train|holdout`, `build`
 │   ├── finetune_dp.py            # NEW (Phase 2): thin CLI over trainer.run_training
-│   └── failure_study.py          # NEW (Phase 4): one subcommand per study stage, incl. `eval`
+│   ├── failure_study.py          # NEW (Phase 4): one subcommand per study stage, incl. `eval`
+│   └── failure_pipeline.py       # NEW: resumable driver with budget / gate / test pause points
 │
 ├── configs/
 │   └── failure_aware/
 │       ├── protocol.toml         # NEW (Phase 1): task-agnostic protocol (§12.1)
+│       ├── smoke_protocol.toml   # NEW: scaled-down protocol for the cluster smoke run
 │       └── peginsertionside.toml # NEW: per-task lock file (§12.2); plugcharger.toml later
 │
 ├── tests/
 │   ├── test_failure_rollout.py   # NEW (Phase 1)
 │   ├── test_finetune.py          # NEW (Phase 2)
 │   ├── test_failure_guidance.py  # NEW (Phase 3)
-│   └── test_failure_study.py     # NEW (Phase 4): rules, lock file, end-to-end study on fakes
+│   ├── test_failure_study.py     # NEW (Phase 4): rules, lock file, end-to-end study on fakes
+│   └── test_failure_pipeline.py  # NEW: pause points, preemption resume, smoke isolation
 │
 └── slurm/
     └── failure_aware.sbatch      # NEW (Phase 4): one study step per single-GPU job, requeue on exit 75
@@ -892,6 +895,10 @@ After the implementation is frozen:
 | 9 | commit the lock file; `eval --task T --split test --arm B\|F\|A\|C1\|C2` | — |
 
 `scripts/failure_study.py status --task T` prints the locked stages and the GPU-hours recorded so far (re-projection, §10.3).
+
+**Driver and smoke run.** `scripts/failure_pipeline.py` runs every unfinished row of this table in order, inside one job, and stops at the points that need a person: after checkpoint 1's collection it prints the measured rollout cost and the projected total and pauses for the §10.3 budget decision (continue with `--budget-confirmed`); a failed gate ends the study; before the test split it pauses so the lock file is committed first (continue with `--include-test`). Resubmitting the same command continues from the lock file, including after a preemption (exit 75, requeued by `slurm/failure_aware.sbatch`).
+
+Before the study, the same driver runs a **cluster smoke** with `configs/failure_aware/smoke_protocol.toml` (one checkpoint, K = 4, 100/200-step fine-tunes, 4 tuning and 8 test episodes), a scratch `--lock` and a scratch `--rollout-root`. It exercises every stage on real ManiSkill, including the `α = 0` bit-exact check, and is expected to take well under one GPU-hour (not yet measured); its results are discarded. The driver refuses a non-study protocol without its own `--lock` and its own `--rollout-root` (not the run root), and the lock records the rollout root, so the smoke cannot touch the study's lock file or rollout directories. `[evaluation] test_episodes` (100 in the study protocol) is the number of leading test seeds used per (arm, checkpoint).
 
 ---
 

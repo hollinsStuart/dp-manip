@@ -66,12 +66,20 @@ class GuidanceConfig:
 
 
 @dataclass(frozen=True)
+class EvaluationConfig:
+    # Leading test seeds of each checkpoint's recorded [eval] range used per
+    # (arm, checkpoint): the whole range in the study, a few in a smoke run.
+    test_episodes: int
+
+
+@dataclass(frozen=True)
 class FailureProtocol:
     seeds: SeedRanges
     collection: CollectionConfig
     baseline_cell: BaselineCellConfig
     pilot: PilotConfig
     guidance: GuidanceConfig
+    evaluation: EvaluationConfig
     path: Path | None = None
     sha256: str | None = None
 
@@ -83,6 +91,10 @@ class FailureProtocol:
     def holdout_seeds(self) -> list[int]:
         start = self.seeds.collection_holdout[0]
         return list(range(start, start + self.collection.holdout_episodes))
+
+    def test_seeds(self, cfg: Config) -> list[int]:
+        """The test seeds every arm is evaluated on for a checkpoint with config ``cfg``."""
+        return cfg.test_seeds()[: self.evaluation.test_episodes]
 
     def pilot_holdout_end(self) -> int:
         """First holdout seed that belongs to the offline gate, not the pilot."""
@@ -133,6 +145,8 @@ class FailureProtocol:
             raise ValueError("guidance.tuning_episodes exceeds seeds.guidance_tuning")
         if guidance.tie_episodes < 0:
             raise ValueError("guidance.tie_episodes must be non-negative")
+        if self.evaluation.test_episodes < 1:
+            raise ValueError("evaluation.test_episodes must be positive")
 
     def check_against(self, cfg: Config) -> None:
         """Reject a task config whose rollout seeds or env count clash with the protocol."""
@@ -141,6 +155,11 @@ class FailureProtocol:
             clash = sorted(seed for seed in evaluation if start <= seed < end)
             if clash:
                 raise ValueError(f"seeds.{name} overlaps {cfg.task.name} evaluation seeds {clash[:5]}")
+        if self.evaluation.test_episodes > cfg.eval.test_episodes:
+            raise ValueError(
+                f"evaluation.test_episodes={self.evaluation.test_episodes} exceeds "
+                f"{cfg.task.name}'s eval.test_episodes={cfg.eval.test_episodes}"
+            )
         num_envs = cfg.eval.num_envs
         # ``evaluate`` runs full waves of num_envs episodes. The pilot/gate split
         # of the holdout happens after collection, so it need not divide.
@@ -149,6 +168,7 @@ class FailureProtocol:
             "collection.holdout_episodes": self.collection.holdout_episodes,
             "guidance.dry_run_episodes": self.guidance.dry_run_episodes,
             "guidance.tuning_episodes": self.guidance.tuning_episodes,
+            "evaluation.test_episodes": self.evaluation.test_episodes,
         }
         for name, count in counts.items():
             if count % num_envs:
@@ -191,6 +211,7 @@ def load_protocol(path: str | Path = DEFAULT_PROTOCOL) -> FailureProtocol:
         "baseline_cell": BaselineCellConfig,
         "pilot": PilotConfig,
         "guidance": GuidanceConfig,
+        "evaluation": EvaluationConfig,
     }
     unknown = set(raw) - set(sections)
     if unknown:
