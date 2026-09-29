@@ -145,6 +145,10 @@ def rollout_overrides(
         f"data.val_path={json.dumps(f'{label}_pilot.h5')}",
         f"data.num_demos={episodes(f'{label}_train')}",
         f"data.val_num_demos={episodes(f'{label}_pilot')}",
+        # Fine-tuning sets are a few hundred episodes, so decoding them into RAM
+        # up front is cheap and keeps DataLoader workers off gzip; --set
+        # data.preload=false still wins because machine overrides come last.
+        "data.preload=true",
         f"train.lr={lr!r}",
         f"train.total_iters={int(total_iters)}",
         f"train.checkpoint_steps={steps}",

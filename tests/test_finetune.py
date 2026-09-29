@@ -185,6 +185,8 @@ class FinetuneTest(unittest.TestCase):
         self.assertTrue(run_info["frozen_parameters"])
         self.assertTrue(all(name.startswith("observation_encoder.") for name in run_info["frozen_parameters"]))
         self.assertEqual(run_info["config"]["train"]["lr"], 1e-3)
+        # Fine-tuning preloads its rollout sets by default.
+        self.assertIs(run_info["config"]["data"]["preload"], True)
         for section in ("task", "vision", "policy", "diffusion", "eval"):
             self.assertEqual(run_info["config"][section], baseline["config"][section], section)
         lrs = [json.loads(line)["lr"] for line in (run_dir / "metrics.jsonl").read_text().splitlines() if "lr" in line]
@@ -237,6 +239,11 @@ class FinetuneTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, r"seeds must lie in \[20000, 21000\)"):
             self.finetune(exp="ft_bad_seeds")
+
+    def test_machine_override_can_turn_preload_off(self) -> None:
+        self.assertEqual(self.finetune("--set", "data.preload=false", exp="ft_lazy"), 0)
+        run_info = json.loads((self.rollout_dir / "ft_lazy" / "run.json").read_text())
+        self.assertIs(run_info["config"]["data"]["preload"], False)
 
     def test_locked_sections_cannot_be_overridden(self) -> None:
         with self.assertRaisesRegex(ValueError, "policy.kernel_size"):
