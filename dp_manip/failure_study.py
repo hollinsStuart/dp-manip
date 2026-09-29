@@ -294,7 +294,10 @@ def denoising_loss(policy, info, device, *, seed: int = 0, batch_size: int = 64)
 
     from .data import RGBWindowDataset
 
-    dataset = RGBWindowDataset(info, policy.obs_horizon, policy.pred_horizon)
+    # Windows are read in order in the main process; lazily, each one would
+    # re-inflate gzip chunks spanning 23 frames. Preloading reads each chunk once
+    # and yields bit-identical windows.
+    dataset = RGBWindowDataset(info, policy.obs_horizon, policy.pred_horizon, preload=True)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     generator = torch.Generator(device=device).manual_seed(seed)
     was_training = policy.training
