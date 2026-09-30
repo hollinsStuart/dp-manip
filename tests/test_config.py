@@ -5,7 +5,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-from dp_manip.config import default_run_name, from_dict, from_recorded, load, load_experiment, load_run
+from dp_manip.config import default_run_name, from_dict, from_recorded, load, load_experiment, load_run, same_run
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -242,11 +242,14 @@ values = [10]
         del recorded["data"]["preload"]
 
         restored = from_recorded(recorded)
-        # These are the values those runs actually trained with, which match
-        # today's baseline, so an old resume.pt still equals a fresh config.
+        # These are the values those runs actually trained with. They match
+        # today's baseline except data.preload (true since Phase 21), which
+        # never changes the samples, so an old resume.pt is still the same run.
         self.assertEqual(restored.train.betas, [0.95, 0.999])
         self.assertEqual(restored.policy.backbone, "unet")
         self.assertFalse(restored.data.preload)
+        self.assertTrue(same_run(restored, load(TASKS / "pickcube.toml")))
+        current["data"]["preload"] = False
         self.assertEqual(restored.to_dict(), current)
 
         # Fresh configs get no such help: baseline.toml is the only source.
@@ -256,12 +259,16 @@ values = [10]
     def test_preload_is_runtime_metadata_not_a_control(self) -> None:
         from dp_manip.invariants import RUNTIME_KEYS, SEED_KEY, control_hash
 
-        lazy = load(TASKS / "pickcube.toml")
-        preloaded = load(TASKS / "pickcube.toml", ["data.preload=true"])
-        self.assertFalse(lazy.data.preload)
+        preloaded = load(TASKS / "pickcube.toml")
+        lazy = load(TASKS / "pickcube.toml", ["data.preload=false"])
         self.assertTrue(preloaded.data.preload)
+        self.assertFalse(lazy.data.preload)
         keys = {SEED_KEY, *RUNTIME_KEYS}
         self.assertEqual(control_hash(lazy, keys), control_hash(preloaded, keys))
+        # A lazily recorded run is the same run as a preloaded invocation, but
+        # any other difference still separates runs.
+        self.assertTrue(same_run(lazy, preloaded))
+        self.assertFalse(same_run(lazy, load(TASKS / "pickcube.toml", ["train.seed=2"])))
         # Runs recorded before the field existed keep their control hash.
         recorded = lazy.to_dict()
         del recorded["data"]["preload"]

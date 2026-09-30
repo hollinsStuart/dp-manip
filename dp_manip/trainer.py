@@ -324,7 +324,7 @@ def run_training(
         if resume == "never":
             raise FileExistsError(f"{resume_path} exists; use --resume auto or choose another experiment")
         checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
-        if config_lib.from_recorded(checkpoint["config"]).to_dict() != cfg.to_dict():
+        if not config_lib.same_run(config_lib.from_recorded(checkpoint["config"]), cfg):
             raise ValueError("resume checkpoint config differs from this invocation")
         if checkpoint.get("finetune") != finetune_record:
             raise ValueError("resume checkpoint fine-tuning record differs from this invocation")

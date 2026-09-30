@@ -70,11 +70,12 @@ checkpoint、`resume.pt`、`run.json` 时用 `config.from_recorded`：对后来�
 集群上可用 `--data-root` 覆盖数据根目录。临时 smoke 可用
 `--set train.total_iters=...`；正式实验仍使用 baseline 的固定训练预算。
 
-新实验可加 `--set data.preload=true`：训练开始前把所选 episode 的 RGB 一次性解码进内存
-（每条 demo 约 15 MB，train 和 val 都会加载），DataLoader worker 不再逐窗口解压 gzip。
-默认 `false`，即原来的逐窗口懒读。读出的样本逐位相同，所以它和 `data.root` 一样属于运行时
-字段，不进 `control_hash`，也不算 drift；但同一个 run 续跑（resume）时要保持同样的取值。
-failure-aware 微调（`scripts/finetune_dp.py`）默认开启预加载，需要关闭时加 `--set data.preload=false`。
+`data.preload` 默认 `true`：训练开始前把所选 episode 的 RGB 一次性解码进内存
+（每条 demo 约 15 MB，train 和 val 都会加载；N=400 约 7 GB），DataLoader worker 不再逐窗口解压 gzip
+（job 135722：吞吐 2.34×，GPU 利用率 51% → 88%）。内存紧张时加 `--set data.preload=false`
+回到逐窗口懒读。读出的样本逐位相同，所以它和 `data.root` 一样属于运行时字段，不进 `control_hash`，
+也不算 drift；完成判断和 resume 也忽略它，所以以前用懒读完成或中断的 run 在默认 preload 下
+仍算已完成、仍可续跑（`config.same_run`）。
 
 提交正式实验前，用 `scripts/check_experiment.py` 自动做 Gate B 检查：它解析 spec 声明的
 所有 `(value, seed)` cell，只允许声明的实验变量、replicate seed 和运行时 `data.root` / `data.preload` 不同；

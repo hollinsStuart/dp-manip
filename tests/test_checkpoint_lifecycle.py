@@ -130,6 +130,23 @@ class CheckpointLifecycleTest(unittest.TestCase):
             resumed = torch.load(final_path, map_location="cpu", weights_only=False)
             self.assertEqual(resumed["step"], 2)
 
+    def test_lazy_run_resumes_and_completes_with_preload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = smoke_config(root / "data")
+            self.assertTrue(cfg.data.preload)
+            output_root = root / "runs"
+            cfg.data.preload = False
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+
+            # A lazily recorded resume.pt and final.pt belong to the same run.
+            cfg.data.preload = True
+            final_path = output_root / config_lib.default_run_name(cfg) / "checkpoints" / "final.pt"
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+            final_path.unlink()
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+            self.assertEqual(torch.load(final_path, map_location="cpu", weights_only=False)["step"], 2)
+
     def test_finished_run_with_another_config_is_not_reused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

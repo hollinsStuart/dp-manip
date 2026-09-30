@@ -137,3 +137,38 @@ val: success_once=0.000 success_at_end=0.000 (2 episodes); /userhome/cs5/u368413
   warn("Failed to find system libvulkan. Fallback to SAPIEN builtin libvulkan.")
 val: success_once=0.000 success_at_end=0.000 (2 episodes); /userhome/cs5/u3684139/dp-smoke/smoke_mlp/eval/val_final.json
 ```
+
+## Step 4: DataLoader lazy vs preload (job 135722)
+
+```bash
+u3684139@gpu2gate1:~/dp-manip$ sbatch --export=ALL,DATA_ROOT=$HOME/maniskill-demogen/data/dataset slurm/bench_dataload.sbatch
+Submitted batch job 135722   # gpu-4080-413, 1x RTX 4080, 4 CPUs
+```
+
+配置：`TASK=peginsertionside`，`NUM_DEMOS=100`，`SEED=1`，`NUM_WORKERS=3`，
+`STEPS=1200`，`WARMUP=200`，`ORDER="lazy preload lazy preload"`。测量窗口为第 200–1200 步；
+每轮开始前把 train/val HDF5 读一遍以预热 page cache。
+
+```text
+# peginsertionside n100 seed 1: steps 200-1200, 3 workers, 4 CPUs, job 135722
+
+| run | steps/s | wall s | GPU % | CPU % | cores | peak RAM GB | preload s | preload GB | startup s |
+|---|---|---|---|---|---|---|---|---|---|
+| bench_lazy_r1 | 5.75 | 173.9 | 52.2 | 85.0 | 3.40 | 2.69 | 0.0 | 0.00 | 33.3 |
+| bench_preload_r1 | 13.49 | 74.1 | 86.4 | 36.1 | 1.44 | 4.60 | 12.5 | 2.06 | 21.6 |
+| bench_lazy_r2 | 5.81 | 172.1 | 50.7 | 85.5 | 3.42 | 2.58 | 0.0 | 0.00 | 9.1 |
+| bench_preload_r2 | 13.54 | 73.9 | 89.7 | 35.9 | 1.43 | 4.56 | 12.0 | 2.06 | 19.8 |
+
+lazy     x2: 5.78 steps/s, GPU 51.5%, CPU 85.3%, peak RAM 2.64 GB
+preload  x2: 13.51 steps/s, GPU 88.0%, CPU 36.0%, peak RAM 4.58 GB
+speedup (preload / lazy steps/s): 2.34x
+max |train_loss| gap lazy vs preload (first pair): 0.000000
+```
+
+读法：lazy 逐窗口解 gzip 让 DataLoader worker 把 CPU 打满（85%），GPU 只有约一半利用率
+（51%），训练受 I/O 限制；`data.preload=true` 在启动前把所选 episode 的 RGB 一次性解码进内存
+（约 12s、约 2GB），之后 CPU 降到 36%、GPU 升到 88%，吞吐 **2.34×**。两种模式的 `train_loss`
+逐位一致（差 `0.000000`），说明 preload 只改速度、不改结果。
+
+产物：`~/dp-manip/bench/dataload/135722/`（`summary.md`、`summary.json`、每轮 `.log` 与
+`.monitor.csv`，以及 `runs/` 下的 run 目录）。

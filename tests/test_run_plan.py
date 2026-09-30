@@ -96,6 +96,17 @@ class CompletionStateTest(unittest.TestCase):
         self.assertIs(completion.state, RunState.CONFLICT)
         self.assertIn("different config", completion.reason)
 
+    def test_lazily_recorded_final_checkpoint_is_completed(self) -> None:
+        # data.preload changes how windows are read, never the samples, so a
+        # run finished with lazy reads is not retrained now that preload is on.
+        recorded = self.run.resolve().to_dict()
+        self.assertTrue(recorded["data"]["preload"])
+        del recorded["data"]["preload"]
+        checkpoint_dir = write_checkpoints(self.output_root, self.run)
+        (checkpoint_dir / "final.pt").write_bytes(b"")
+        write_run_json(self.output_root, self.run, recorded)
+        self.assertIs(self.completion().state, RunState.COMPLETED)
+
     def test_unreadable_run_json_is_a_conflict(self) -> None:
         checkpoint_dir = write_checkpoints(self.output_root, self.run)
         (checkpoint_dir / "final.pt").write_bytes(b"")

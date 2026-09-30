@@ -345,6 +345,21 @@ def from_recorded(raw: dict[str, Any], overrides: Sequence[str] = ()) -> Config:
     return from_dict(raw)
 
 
+# Keys that change how a run reads its data but never the samples it trains
+# on. Runs recorded lazily (preload=false, the default before Phase 21) are the
+# same run as a preloaded invocation, so they stay completed and resumable.
+_EXECUTION_ONLY = (("data", "preload"),)
+
+
+def same_run(recorded: Config, cfg: Config) -> bool:
+    """Whether a recorded run (``run.json`` / ``resume.pt``) is ``cfg``'s run."""
+    ours, theirs = recorded.to_dict(), cfg.to_dict()
+    for section, key in _EXECUTION_ONLY:
+        ours[section].pop(key, None)
+        theirs[section].pop(key, None)
+    return ours == theirs
+
+
 def from_dict(raw: dict[str, Any]) -> Config:
     """Build a resolved config, adapting the version-1 checkpoint layout."""
     raw = _adapt_legacy_config(raw)

@@ -6,8 +6,8 @@ experiment grid value and hands the result to the single trainer in
 ``dp_manip.trainer``. The unified task/experiment/value entry point is
 ``scripts/run_experiment.py``; both share the same training pipeline.
 
-Training is cluster-first: RGB is read lazily by DataLoader worker processes
-(``--set data.preload=true`` decodes the selected episodes into RAM up front
+Training is cluster-first: the selected episodes' RGB is decoded into RAM up
+front (``--set data.preload=false`` reads it lazily in DataLoader workers
 instead; see configs/README.md), the run is fixed to an optimizer-step budget,
 restartable checkpoints also carry Python/NumPy/torch RNG state, and no
 ManiSkill installation is needed until closed-loop evaluation. Batches are drawn per optimizer step from

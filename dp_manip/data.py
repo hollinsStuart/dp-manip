@@ -1,10 +1,10 @@
-"""Lazy RGB trajectory loading for the ``maniskill-demogen`` export schema.
+"""RGB trajectory loading for the ``maniskill-demogen`` export schema.
 
-Only low-dimensional observations and actions are scanned eagerly. By default
-compressed RGB frames remain in HDF5 and are read by DataLoader workers per
-temporal window, keeping large demonstration sets from consuming several GB of
-RAM. With ``preload=True`` the selected episodes are decoded into RAM once;
-every chunk is then decompressed a single time instead of once per window.
+By default the selected episodes are decoded into RAM once (about 15 MB per
+demo), so every gzip chunk is decompressed a single time. With
+``preload=False`` compressed RGB frames remain in HDF5 and DataLoader workers
+read them per temporal window, which re-inflates each chunk once per window and
+saturates the CPU; windows are bit-identical either way.
 """
 
 from __future__ import annotations
@@ -250,12 +250,13 @@ EPISODE_KEYS = ("obs_rgb/rgb", "obs_rgb/state", "actions")
 class RGBWindowDataset(Dataset):
     """Episode-local observation/action windows with repeated boundary padding.
 
-    ``preload`` decodes every selected episode into RAM up front. Windows are
-    bit-identical to lazy reads; build the dataset before DataLoader workers
-    fork so they share the arrays copy-on-write instead of copying them.
+    ``preload`` (the default) decodes every selected episode into RAM up
+    front; ``preload=False`` reads windows lazily from HDF5. Windows are
+    bit-identical either way; build the dataset before DataLoader workers fork
+    so they share the arrays copy-on-write instead of copying them.
     """
 
-    def __init__(self, info: DatasetInfo, obs_horizon: int, pred_horizon: int, *, preload: bool = False):
+    def __init__(self, info: DatasetInfo, obs_horizon: int, pred_horizon: int, *, preload: bool = True):
         self.info = info
         self.obs_horizon = obs_horizon
         self.pred_horizon = pred_horizon

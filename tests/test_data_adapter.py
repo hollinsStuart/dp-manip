@@ -88,8 +88,8 @@ class Hdf5AdapterTest(unittest.TestCase):
             path.with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
 
             info = read_dataset_info(path)
-            lazy = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4)
-            preloaded = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4, preload=True)
+            lazy = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4, preload=False)
+            preloaded = RGBWindowDataset(info, obs_horizon=2, pred_horizon=4)
             self.assertEqual(len(lazy), len(preloaded))
             for item in range(len(lazy)):
                 expected, actual = lazy[item], preloaded[item]

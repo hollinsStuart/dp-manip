@@ -2,7 +2,7 @@
 
 - 已切换为 `maniskill-demogen` RGB schema：`obs_rgb/rgb + obs_rgb/state`。
 - 六任务配置已按最终任务表建立；PegInsertionSide/PlugCharger 使用 `pd_joint_pos`。
-- 训练已改为集群优先：HDF5 懒加载、worker DataLoader、AMP、EMA、可恢复 checkpoint。
+- 训练已改为集群优先：RGB 预加载进内存（`data.preload`）、worker DataLoader、AMP、EMA、可恢复 checkpoint。
 - Slurm 核心 96 组与条件 N=400 数组入口已建立。
 - 闭环评估已改为 RGB 环境，并固定使用与数据一致的 `physx_cpu`。
 - Phase 0 已冻结 commit `834be80` 的 PickCube RGB baseline，并实测完成最小
@@ -116,5 +116,10 @@
   `training.py` / `trainer.py` 职责互相注明，canonical 代码的 unused import
   扫描干净（仅 `__future__ annotations` 与 `envs.py` 里显式标注的 ManiSkill 注册 import）。
   按 §25 未做 `dp_manip`→`dp_policy` 等大规模目录 rename，也未引入新的 lint 工具链。
+- Phase 21 把 `data.preload` 设为默认 `true`（job 135722：lazy 逐窗口解 gzip 使 CPU 85%、GPU 51%；
+  preload 后 GPU 88%、吞吐 2.34×，train_loss 逐位一致）。`RGBWindowDataset` 默认预加载，
+  finetune 去掉多余的 preload override。完成判断（`completion_state`）与 resume 检查改用
+  `config.same_run`，忽略 `data.preload`，所以以前用懒读完成或中断的 run 仍算已完成、仍可续跑。
+  Phase 0 manifest 升到 schema version 11。`--set data.preload=false` 仍可回到懒读。
 - 本机没有项目的 ManiSkill/GPU 环境；完整数据检查与正式 GPU smoke 仍需在集群完成。
   本机临时 venv（torch/diffusers/h5py）仅用于 CPU 单元测试与合成数据 smoke，不是项目环境。

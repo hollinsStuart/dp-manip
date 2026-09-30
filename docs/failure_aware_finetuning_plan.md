@@ -414,7 +414,7 @@ failure-dataset seed validation
 
 A thin CLI wrapper is acceptable, but it should still call the same trainer implementation.
 
-**Data loading.** Fine-tuning runs with `data.preload = true` (set by `finetune.rollout_overrides`): the rollout sets are decoded into RAM once instead of re-inflating gzip chunks per window, which otherwise saturates the DataLoader workers. The offline pilot and gate losses (`denoising_loss`, §6.7) preload their holdout sets the same way. Windows are bit-identical to lazy reads, so this changes speed only, never results; `--set data.preload=false` restores lazy reads. `data.preload` is runtime metadata, outside the control hash.
+**Data loading.** Fine-tuning runs with `data.preload = true` (the baseline default since phase 21): the rollout sets are decoded into RAM once instead of re-inflating gzip chunks per window, which otherwise saturates the DataLoader workers. The offline pilot and gate losses (`denoising_loss`, §6.7) preload their holdout sets the same way. Windows are bit-identical to lazy reads, so this changes speed only, never results; `--set data.preload=false` restores lazy reads. `data.preload` is runtime metadata, outside the control hash.
 
 ---
 

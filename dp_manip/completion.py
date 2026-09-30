@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Config, from_recorded
+from .config import Config, from_recorded, same_run
 
 
 class RunState(enum.Enum):
@@ -77,7 +77,7 @@ def completion_state(
             finished = from_recorded(run_info["config"])
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             return Completion(RunState.CONFLICT, reason=f"run.json is unreadable: {error}")
-        if finished.to_dict() != cfg.to_dict():
+        if not same_run(finished, cfg):
             return Completion(RunState.CONFLICT, reason="run.json records a different config")
         if run_info.get("finetune") != finetune:
             return Completion(RunState.CONFLICT, reason="run.json records a different fine-tuning init")
