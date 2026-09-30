@@ -38,8 +38,20 @@ def make_stats(proprio_dim: int, action_dim: int) -> NormalizationStats:
     )
 
 
-def make_vision(feature_dim: int = 8, random_shift: int = 2, share: bool = True) -> VisionConfig:
-    return VisionConfig(feature_dim=feature_dim, random_shift=random_shift, share_camera_encoder=share)
+def make_vision(
+    feature_dim: int = 8,
+    random_shift: int = 2,
+    share: bool = True,
+    pool: str = "avg",
+    num_keypoints: int = 32,
+) -> VisionConfig:
+    return VisionConfig(
+        feature_dim=feature_dim,
+        random_shift=random_shift,
+        share_camera_encoder=share,
+        pool=pool,
+        num_keypoints=num_keypoints,
+    )
 
 
 def make_encoder(

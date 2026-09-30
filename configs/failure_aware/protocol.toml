@@ -1,0 +1,55 @@
+# Failure-aware DP study protocol (docs/failure_aware_finetuning_plan.md §11).
+#
+# Task-agnostic: every task uses these values. Values derived for one task
+# (baseline cell, checkpoints, K and L_fail per checkpoint, pilot choice, alpha)
+# go to the per-task lock file configs/failure_aware/<task>.toml (§12).
+# Evaluation seeds, num_envs and the inference seed are not repeated here: they
+# come from each baseline checkpoint's recorded [eval] config.
+
+[seeds]
+# Half-open [start, end) seed ranges reserved for this study (§3.5).
+collection_train = [20000, 21000]
+collection_holdout = [21000, 22000]
+guidance_tuning = [22000, 23000]
+
+[collection]
+# K: failures and successes kept per checkpoint, as seed-ordered prefixes (§3.4).
+dataset_size = 150
+# Train rollouts stop once both classes reach K, or at this cap.
+rollout_cap = 600
+holdout_episodes = 100
+# The first part of the holdout feeds the lr/steps pilot (§4.4); the rest the
+# offline gate (§6.7).
+pilot_holdout_episodes = 50
+# L_fail = ceil_to_act_horizon(factor * median stored success length) (§3.3).
+failure_truncation_factor = 1.5
+# Fewer successes than this on any checkpoint: C1/C2 are dropped (§1).
+low_success_min = 50
+
+[baseline_cell]
+# Mean validation success_once (over val_seeds) a baseline cell needs to be used
+# normally (§1); the study then runs on the cell's checkpoint_seeds (§4.1).
+min_val_success = 0.15
+max_val_success = 0.85
+val_seeds = [1, 2, 3, 4, 5]
+checkpoint_seeds = [1, 2, 3]
+
+[pilot]
+learning_rates = [1e-5, 1e-4]
+steps = [5000, 10000, 20000]
+# Candidates within this relative margin of the best prefer fewer steps, then lower lr.
+relative_tie = 0.05
+
+[guidance]
+alpha_grid = [0.5, 1.0, 2.0]
+# Both counts must be multiples of eval.num_envs (4): evaluate runs full waves.
+# The plan's 10 / 50 were changed to 8 / 48 before any run for this reason.
+dry_run_episodes = 8
+tuning_episodes = 48
+# Pooled tuning success within this many episodes of the best prefers the smaller alpha.
+tie_episodes = 2
+
+[evaluation]
+# Test episodes per (arm, checkpoint): the leading seeds of the checkpoint's
+# recorded test range (10000-10099), i.e. all of them (§6.4).
+test_episodes = 100

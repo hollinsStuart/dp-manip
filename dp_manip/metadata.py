@@ -33,6 +33,15 @@ def git_revision(cwd: str | Path) -> dict[str, str | bool | None]:
     }
 
 
+def file_sha256(path: str | Path) -> str:
+    """Hash a file in 1 MiB blocks (checkpoints are a few hundred MB)."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def dataset_fingerprint(info: "DatasetInfo") -> dict[str, Any]:
     """Identify a dataset file without re-reading its compressed RGB.
 

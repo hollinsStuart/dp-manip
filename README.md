@@ -208,7 +208,8 @@ fingerprint，所以一个 checkpoint 能追溯到具体的数据文件。
 
 ## 代码导航
 
-- `dp_manip/data.py`：demogen schema 校验、流式统计、HDF5 懒加载 temporal windows。
+- `dp_manip/data.py`：demogen schema 校验、流式统计、temporal windows；默认启动前把所选 episode
+  一次性解码进内存，`data.preload=false` 时回到 HDF5 懒加载（样本逐位相同，见 `configs/README.md`）。
 - `dp_manip/vision.py`：不依赖 torchvision 的 GroupNorm ResNet-18 与随机平移增强。
 - `dp_manip/observation_encoder.py`：共享 RGB + proprio observation encoder，固定输出 `(B, To, Dobs)`。
 - `dp_manip/backbones/`：`NoisePredictor` 接口、`policy.backbone` 注册表、包装 canonical UNet
@@ -229,6 +230,12 @@ fingerprint，所以一个 checkpoint 能追溯到具体的数据文件。
 - `scripts/train_queue.py` / `scripts/eval_queue.py`：单作业双 GPU 的训练/评估队列入口。
 - `slurm/train_dual_gpu.sbatch` / `slurm/eval_dual_gpu.sbatch`：当前 QOS 下推荐的生产入口。
 - `docs/cluster-smoke-test.zh-CN.md`：提交正式 sweep 前的集群 smoke 检查表。
+- `slurm/bench_dataload.sbatch` / `scripts/dataload_bench.py`：单 GPU 上 lazy 与 `data.preload` 的
+  DataLoader 吞吐对比（交替运行、测量窗口内的 steps/s、GPU/CPU 利用率、内存），输出在 `bench/`。
+- Failure-aware 研究（`exp/failure-aware-dp`，计划见 `docs/failure_aware_finetuning_plan.md`）：
+  `scripts/collect_rollouts.py`（rollout 收集与数据集 build）、`scripts/finetune_dp.py`（从 baseline
+  checkpoint 微调）、`scripts/failure_study.py`（逐阶段 CLI 与 lock 文件）、
+  `scripts/failure_pipeline.py`（可续跑的总驱动，含 smoke），均通过 `slurm/failure_aware.sbatch` 提交。
 - `dp_manip/training.py`：EMA、RNG state 存取、`(seed, step)` 确定性 sampler、resume checkpoint 组装。
 - `baselines/phase0/pickcube_rgb.json`：重构前 RGB baseline 的机器可读 regression reference。
 - `legacy/`：Phase 16 归档的 state-based 工作流（含 `run_cpu.py` 与旧 WSL/Ubuntu 清单）；

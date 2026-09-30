@@ -2,7 +2,7 @@
 
 当前实现是共享的 RGB Diffusion Policy：
 
-- `data.py` 直接读取 `maniskill-demogen` 的 `obs_rgb/{rgb,state}`，图像懒加载；
+- `data.py` 直接读取 `maniskill-demogen` 的 `obs_rgb/{rgb,state}`，图像默认一次性解码进内存（`data.preload=false` 时懒加载）；
 - `vision.py` 用 GroupNorm ResNet-18 编码每个相机；
 - `observation_encoder.py` 把 RGB + 非特权 proprioception 编码成共享的 `(B, To, Dobs)` 序列；
 - `backbones/` 提供统一的 `NoisePredictor` 接口与 UNet / Transformer / MLP 三种主干；

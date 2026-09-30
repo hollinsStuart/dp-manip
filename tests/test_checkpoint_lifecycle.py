@@ -130,6 +130,23 @@ class CheckpointLifecycleTest(unittest.TestCase):
             resumed = torch.load(final_path, map_location="cpu", weights_only=False)
             self.assertEqual(resumed["step"], 2)
 
+    def test_lazy_run_resumes_and_completes_with_preload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = smoke_config(root / "data")
+            self.assertTrue(cfg.data.preload)
+            output_root = root / "runs"
+            cfg.data.preload = False
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+
+            # A lazily recorded resume.pt and final.pt belong to the same run.
+            cfg.data.preload = True
+            final_path = output_root / config_lib.default_run_name(cfg) / "checkpoints" / "final.pt"
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+            final_path.unlink()
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu"), 0)
+            self.assertEqual(torch.load(final_path, map_location="cpu", weights_only=False)["step"], 2)
+
     def test_finished_run_with_another_config_is_not_reused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -147,6 +164,21 @@ class CheckpointLifecycleTest(unittest.TestCase):
             # instead of silently reusing it (the planner reports this conflict).
             with self.assertRaises(FileExistsError):
                 run_training(cfg, output_root=output_root, device="cpu")
+
+    def test_resume_never_accepts_only_a_fresh_run_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = smoke_config(root / "data")
+            output_root = root / "runs"
+            # A fresh directory trains, although the trainer creates checkpoints/ itself.
+            self.assertEqual(run_training(cfg, output_root=output_root, device="cpu", resume="never"), 0)
+
+            # Leftovers from an interrupted run (no final.pt) are rejected, not resumed.
+            run_dir = output_root / config_lib.default_run_name(cfg)
+            (run_dir / "checkpoints" / "final.pt").unlink()
+            (run_dir / "checkpoints" / "resume.pt").unlink()
+            with self.assertRaisesRegex(FileExistsError, "is not empty"):
+                run_training(cfg, output_root=output_root, device="cpu", resume="never")
 
 
 if __name__ == "__main__":

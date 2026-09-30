@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Config, from_recorded
+from .config import Config, from_recorded, same_run
 
 
 class RunState(enum.Enum):
@@ -46,8 +46,14 @@ class Completion:
     reason: str | None = None
 
 
-def completion_state(cfg: Config, run_dir: str | Path) -> Completion:
+def completion_state(
+    cfg: Config, run_dir: str | Path, finetune: dict | None = None
+) -> Completion:
     """Return what the trainer would do for ``cfg`` in ``run_dir``.
+
+    ``finetune`` is the trainer's fine-tuning record (init checkpoint and its
+    hash, frozen modules, schedule); a finished run must have recorded the same
+    one. Baseline runs pass ``None`` and record none.
 
     Mirrors the skip block of :func:`dp_manip.trainer.run_training`:
 
@@ -67,10 +73,12 @@ def completion_state(cfg: Config, run_dir: str | Path) -> Completion:
     run_info_path = run_dir / "run.json"
     if run_info_path.is_file():
         try:
-            recorded = json.loads(run_info_path.read_text(encoding="utf-8"))["config"]
-            finished = from_recorded(recorded)
+            run_info = json.loads(run_info_path.read_text(encoding="utf-8"))
+            finished = from_recorded(run_info["config"])
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             return Completion(RunState.CONFLICT, reason=f"run.json is unreadable: {error}")
-        if finished.to_dict() != cfg.to_dict():
+        if not same_run(finished, cfg):
             return Completion(RunState.CONFLICT, reason="run.json records a different config")
+        if run_info.get("finetune") != finetune:
+            return Completion(RunState.CONFLICT, reason="run.json records a different fine-tuning init")
     return Completion(RunState.COMPLETED)

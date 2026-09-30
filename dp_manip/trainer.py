@@ -24,6 +24,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from . import config as config_lib
+from . import finetune as finetune_lib
 from .completion import RunState, completion_state
 from .config import Config
 from .data import (
@@ -33,7 +34,8 @@ from .data import (
     compute_normalization,
     read_dataset_info,
 )
-from .metadata import dataset_fingerprint, git_revision
+from .finetune import FinetuneSpec
+from .metadata import dataset_fingerprint, file_sha256, git_revision
 from .policy import (
     DiffusionPolicy,
     adapt_legacy_state_dict,
@@ -45,6 +47,7 @@ from .training import (
     StepSeededIndexSampler,
     atomic_torch_save,
     averaged_state_dict,
+    constant_warmup,
     cosine_warmup,
     resume_checkpoint,
     set_rng_state,
@@ -69,13 +72,20 @@ def resolve_data_path(data_root: Path, relative: str) -> Path:
     return path if path.is_absolute() else data_root / path
 
 
-def check_dataset(info: DatasetInfo, cfg: Config, split: str) -> None:
+def check_dataset(
+    info: DatasetInfo, cfg: Config, split: str, seed_range: tuple[int, int] | None = None
+) -> None:
+    """Check env, control mode and seeds; ``seed_range`` replaces the expert rule
+    for rollout datasets (failure-aware plan §3.5)."""
     if info.env_id != cfg.task.env_id:
         raise ValueError(f"{split} dataset env_id={info.env_id!r}, expected {cfg.task.env_id!r}")
     if info.control_mode != cfg.task.control_mode:
         raise ValueError(
             f"{split} dataset control_mode={info.control_mode!r}, expected {cfg.task.control_mode!r}"
         )
+    if seed_range is not None:
+        finetune_lib.check_seed_range(info, seed_range, split)
+        return
     if split == "train" and any(seed >= 4_000 for seed in info.seeds):
         raise ValueError("training demonstrations must use seeds below 4000")
     if split == "val" and any(not 4_000 <= seed < 5_000 for seed in info.seeds):
@@ -141,8 +151,9 @@ def inference_payload(
     val_info: DatasetInfo,
     stats: NormalizationStats,
     step: int,
+    finetune: Mapping[str, Any] | None = None,
 ) -> dict:
-    return {
+    payload = {
         "format_version": 2,
         "model": averaged_state_dict(policy, ema),
         "config": cfg.to_dict(),
@@ -151,6 +162,9 @@ def inference_payload(
         "normalization": stats.to_dict(),
         "step": step,
     }
+    if finetune is not None:
+        payload["finetune"] = dict(finetune)
+    return payload
 
 
 def run_training(
@@ -161,12 +175,18 @@ def run_training(
     device: str = "cuda",
     resume: str = "auto",
     experiment_context: Mapping[str, Any] | None = None,
+    finetune: FinetuneSpec | None = None,
 ) -> int:
     """Train, checkpoint and validate one resolved configuration.
 
     ``experiment_context`` carries the declared cell metadata (experiment
     name/variable/value and the control hash) from the entry point into
     ``run.json``; it is ``None`` for runs outside an experiment grid.
+
+    ``finetune`` starts from a baseline checkpoint instead of from scratch
+    (``dp_manip.finetune``): its weights and normalization are reused, the
+    spec's modules are frozen, and the rollout datasets must come from that
+    checkpoint. Without it, training is exactly the baseline pipeline.
 
     Returns ``0`` on completion, ``75`` after a scheduler signal wrote
     ``resume.pt`` (the Slurm requeue convention), or ``0`` immediately when
@@ -178,6 +198,18 @@ def run_training(
         raise RuntimeError("CUDA was requested but is unavailable; cluster training must run on a GPU node")
     seed_everything(cfg.train.seed)
 
+    init_checkpoint: dict | None = None
+    finetune_record: dict | None = None
+    if finetune is not None:
+        init_path = Path(finetune.init_checkpoint).expanduser().resolve()
+        init_checkpoint = torch.load(init_path, map_location="cpu", weights_only=False)
+        finetune_lib.check_locked_sections(cfg, config_lib.from_recorded(init_checkpoint["config"]))
+        finetune_record = {
+            "spec": finetune.to_dict(),
+            "init_checkpoint_sha256": file_sha256(init_path),
+            "init_checkpoint_step": int(init_checkpoint["step"]),
+        }
+
     data_root = Path(cfg.data.root).expanduser()
     if not data_root.is_absolute():
         data_root = ROOT / data_root
@@ -187,8 +219,12 @@ def run_training(
     val_info = read_dataset_info(
         resolve_data_path(data_root, cfg.data.val_path), cfg.data.val_num_demos
     )
-    check_dataset(train_info, cfg, "train")
-    check_dataset(val_info, cfg, "val")
+    check_dataset(train_info, cfg, "train", finetune.train_seed_range if finetune else None)
+    check_dataset(val_info, cfg, "val", finetune.val_seed_range if finetune else None)
+    if init_checkpoint is not None and finetune_record is not None:
+        for split, info in (("train", train_info), ("val", val_info)):
+            finetune_lib.check_rollout_source(info, finetune_record["init_checkpoint_sha256"], split)
+            finetune_lib.check_schema(info, init_checkpoint["train_data"], split)
     if (
         train_info.image_shape,
         train_info.proprio_dim,
@@ -206,9 +242,26 @@ def run_training(
     if overlap:
         raise ValueError(f"rollout seeds overlap demonstration seeds: {sorted(overlap)[:10]}")
 
-    stats = compute_normalization(train_info)
-    train_dataset = RGBWindowDataset(train_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon)
-    val_dataset = RGBWindowDataset(val_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon)
+    # Fine-tuning must stay in the baseline's normalized action/proprio
+    # coordinates (failure-aware plan §4.2): never recompute statistics.
+    stats = (
+        NormalizationStats.from_dict(init_checkpoint["normalization"])
+        if init_checkpoint is not None
+        else compute_normalization(train_info)
+    )
+    preload_start = time.time()
+    train_dataset = RGBWindowDataset(
+        train_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
+    )
+    val_dataset = RGBWindowDataset(
+        val_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
+    )
+    if cfg.data.preload:
+        preloaded_gb = (train_dataset.preloaded_bytes + val_dataset.preloaded_bytes) / 2**30
+        print(
+            f"preloaded {len(train_info.episodes)} train + {len(val_info.episodes)} val episodes "
+            f"in {time.time() - preload_start:.1f} s ({preloaded_gb:.3f} GiB)"
+        )
     experiment = run_name or config_lib.default_run_name(cfg)
     run_dir = output_root.expanduser().resolve() / experiment
     checkpoint_dir = run_dir / "checkpoints"
@@ -216,7 +269,7 @@ def run_training(
     resume_path = checkpoint_dir / "resume.pt"
     # The planner uses this same decision, so an existing final.pt is never
     # reused for a different configuration by either entry point.
-    finished = completion_state(cfg, run_dir)
+    finished = completion_state(cfg, run_dir, finetune=finetune_record)
     if finished.state is RunState.CONFLICT:
         raise FileExistsError(
             f"{run_dir} holds a finished run with a different config; "
@@ -225,6 +278,9 @@ def run_training(
     if finished.state is RunState.COMPLETED:
         print(f"{experiment}: final checkpoint already exists; nothing to do")
         return 0
+    # Decided before the directories below are created, so --resume never
+    # accepts a fresh run directory and rejects only earlier content.
+    had_content = run_dir.is_dir() and any(run_dir.iterdir())
     run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -237,18 +293,28 @@ def run_training(
         action_dim=train_info.action_dim,
         stats=stats,
     ).to(device)
+    frozen: list[str] = []
+    if init_checkpoint is not None and finetune is not None:
+        load_policy_state_dict(policy, init_checkpoint["model"])
+        # Freeze before the optimizer and the EMA are built: both then see only
+        # the trainable parameters, and frozen weights stay bit-identical.
+        frozen = finetune_lib.freeze_modules(policy, finetune.frozen_modules)
+        init_checkpoint = None  # release the baseline weights
     optimizer = torch.optim.AdamW(
-        policy.parameters(),
+        [parameter for parameter in policy.parameters() if parameter.requires_grad],
         lr=cfg.train.lr,
         betas=tuple(cfg.train.betas),
         weight_decay=cfg.train.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lambda step: cosine_warmup(
-            step, warmup_steps=cfg.train.warmup_steps, total_steps=cfg.train.total_iters
-        ),
-    )
+    if finetune is not None and finetune.lr_schedule == "constant_with_warmup":
+        def lr_factor(step: int) -> float:
+            return constant_warmup(step, warmup_steps=cfg.train.warmup_steps)
+    else:
+        def lr_factor(step: int) -> float:
+            return cosine_warmup(
+                step, warmup_steps=cfg.train.warmup_steps, total_steps=cfg.train.total_iters
+            )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_factor)
     use_amp = cfg.train.amp and device.type == "cuda"
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
     ema = ExponentialMovingAverage(policy, cfg.ema.decay)
@@ -258,8 +324,10 @@ def run_training(
         if resume == "never":
             raise FileExistsError(f"{resume_path} exists; use --resume auto or choose another experiment")
         checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
-        if config_lib.from_recorded(checkpoint["config"]).to_dict() != cfg.to_dict():
+        if not config_lib.same_run(config_lib.from_recorded(checkpoint["config"]), cfg):
             raise ValueError("resume checkpoint config differs from this invocation")
+        if checkpoint.get("finetune") != finetune_record:
+            raise ValueError("resume checkpoint fine-tuning record differs from this invocation")
         load_policy_state_dict(policy, checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         scheduler.load_state_dict(checkpoint["scheduler"])
@@ -278,7 +346,7 @@ def run_training(
                 "will not match a continuous run"
             )
         print(f"resuming {experiment} from optimizer step {start_step}")
-    elif resume == "never" and any(run_dir.iterdir()):
+    elif resume == "never" and had_content:
         raise FileExistsError(f"{run_dir} is not empty")
 
     sampler = StepSeededIndexSampler(
@@ -328,6 +396,11 @@ def run_training(
             "val": {"num_demos": len(val_info.episodes), "demo_seeds": val_info.seeds},
         },
         "normalization": stats.to_dict(),
+        **(
+            {"finetune": finetune_record, "frozen_parameters": frozen}
+            if finetune_record is not None
+            else {}
+        ),
         "num_train_windows": len(train_dataset),
         "num_val_windows": len(val_dataset),
         # The sampler is derived from (seed, step) rather than from a stateful
@@ -371,6 +444,7 @@ def run_training(
                 scheduler=scheduler,
                 scaler=scaler,
                 ema=ema,
+                extra={"finetune": finetune_record} if finetune_record is not None else None,
             ),
             resume_path,
         )
@@ -425,7 +499,9 @@ def run_training(
 
         if step in cfg.train.checkpoint_steps:
             atomic_torch_save(
-                inference_payload(policy, ema, cfg, train_info, val_info, stats, step),
+                inference_payload(
+                    policy, ema, cfg, train_info, val_info, stats, step, finetune_record
+                ),
                 checkpoint_dir / f"step_{step:06d}.pt",
             )
         if step % cfg.train.resume_freq == 0 or stop_requested:
@@ -435,7 +511,9 @@ def run_training(
             return 75
 
     atomic_torch_save(
-        inference_payload(policy, ema, cfg, train_info, val_info, stats, cfg.train.total_iters),
+        inference_payload(
+            policy, ema, cfg, train_info, val_info, stats, cfg.train.total_iters, finetune_record
+        ),
         final_path,
     )
     save_resume(cfg.train.total_iters)

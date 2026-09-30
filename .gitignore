@@ -14,3 +14,6 @@ runs/
 slurm-*.out
 .venv-uv-guard/
 .idea/
+
+# Data-loader benchmark output (slurm/bench_dataload.sbatch): logs, run dirs, checkpoints.
+/bench/

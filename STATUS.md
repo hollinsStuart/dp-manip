@@ -2,7 +2,7 @@
 
 - 已切换为 `maniskill-demogen` RGB schema：`obs_rgb/rgb + obs_rgb/state`。
 - 六任务配置已按最终任务表建立；PegInsertionSide/PlugCharger 使用 `pd_joint_pos`。
-- 训练已改为集群优先：HDF5 懒加载、worker DataLoader、AMP、EMA、可恢复 checkpoint。
+- 训练已改为集群优先：RGB 预加载进内存（`data.preload`）、worker DataLoader、AMP、EMA、可恢复 checkpoint。
 - Slurm 核心 96 组与条件 N=400 数组入口已建立。
 - 闭环评估已改为 RGB 环境，并固定使用与数据一致的 `physx_cpu`。
 - Phase 0 已冻结 commit `834be80` 的 PickCube RGB baseline，并实测完成最小
@@ -116,5 +116,28 @@
   `training.py` / `trainer.py` 职责互相注明，canonical 代码的 unused import
   扫描干净（仅 `__future__ annotations` 与 `envs.py` 里显式标注的 ManiSkill 注册 import）。
   按 §25 未做 `dp_manip`→`dp_policy` 等大规模目录 rename，也未引入新的 lint 工具链。
+- Phase 20 已把视觉编码器的池化做成可切换配置：`vision.pool`（`"avg"` | `"spatial_softmax"`，
+  baseline 保持 `"avg"`）与 `vision.num_keypoints`（baseline 32，只在 spatial softmax 下使用），
+  `Config.validate` 拒绝未知 pool 和 `num_keypoints < 1`，`from_recorded` 给旧 checkpoint /
+  `run.json` / `resume.pt` 补 `avg` / 32。`dp_manip/vision.py` 新增 robomimic 式
+  `SpatialSoftmax`（1×1 conv → H×W softmax，可学习温度初值 1，fp32 计算期望坐标），接在 layer4
+  上并投影回 `feature_dim`，encoder 以外不变；avg 分支结构与参数名不变。已知限制：128×128 输入
+  的 layer4 只有 4×4，是否改用 layer3 另行决定。新增实验 `configs/experiments/vision_pool.toml`
+  （两 arm × 种子 1–3，spec 新增的 `[fixed]` 表把 `data.num_demos` 固定为 200 且禁止运行时覆盖）；
+  avg arm 与 data-size N=200 格子同名同 config，直接复用，spatial softmax 的 run 名为
+  `<task>_rgb_unet_ss32_n200_s<seed>`。`num_keypoints` 不豁免 Gate B（理由见
+  `configs/README.md`）。Phase 0 manifest 升到 schema version 10，只新增 vision 两个字段。
+  `tests/test_vision_pool.py` 覆盖两种 pool 输出 shape、关键点落在 [-1, 1]、AMP 下 fp32、
+  forward/backward/optimizer step、非法值被拒、无 pool 字段的旧 checkpoint 经
+  `DiffusionPolicy.from_checkpoint` 按 avg 加载且动作逐位相同、矩阵 Gate B 与 `[fixed]`；
+  六任务 vision_pool 矩阵 36 cells `Gate B ok`。本机 CPU 合成数据（PegInsertionSide 形状，
+  200/50 条 128×128 示范）经 `run_experiment.py` 实测 spatial_softmax arm 的
+  train → SIGUSR1（exit 75）→ resume → load → get_action 通过，`--run-root` 对账无 drift。
+  未改 baseline 默认值，未重跑已有实验。
+- Phase 21 把 `data.preload` 设为默认 `true`（job 135722：lazy 逐窗口解 gzip 使 CPU 85%、GPU 51%；
+  preload 后 GPU 88%、吞吐 2.34×，train_loss 逐位一致）。`RGBWindowDataset` 默认预加载，
+  finetune 去掉多余的 preload override。完成判断（`completion_state`）与 resume 检查改用
+  `config.same_run`，忽略 `data.preload`，所以以前用懒读完成或中断的 run 仍算已完成、仍可续跑。
+  Phase 0 manifest 升到 schema version 11。`--set data.preload=false` 仍可回到懒读。
 - 本机没有项目的 ManiSkill/GPU 环境；完整数据检查与正式 GPU smoke 仍需在集群完成。
   本机临时 venv（torch/diffusers/h5py）仅用于 CPU 单元测试与合成数据 smoke，不是项目环境。

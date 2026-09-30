@@ -6,8 +6,6 @@ import os
 import sys
 from typing import Any
 
-import gymnasium as gym
-
 from .config import Config
 
 
@@ -48,6 +46,8 @@ def make_eval_envs(cfg: Config, num_envs: int, render_backend: str | None = None
     if cfg.task.sim_backend != "physx_cpu":
         raise ValueError("fair evaluation requires physx_cpu, matching the generated data")
     ensure_render_icd()
+    # Imported here so environment_kwargs (rollout provenance) needs no gymnasium.
+    import gymnasium as gym
     import mani_skill.envs  # noqa: F401  registers environment IDs
     from mani_skill.utils.wrappers import CPUGymWrapper
     from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper

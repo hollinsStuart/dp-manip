@@ -166,14 +166,17 @@ def resume_checkpoint(
     scheduler: Any,
     scaler: Any,
     ema: ExponentialMovingAverage,
+    extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the restartable checkpoint written by the training loop.
 
     Unlike the inference checkpoints, this payload captures the full training
     state including RNG streams, so a requeued run continues the trajectory of
-    a continuous run from the same optimizer step.
+    a continuous run from the same optimizer step. ``extra`` adds run-level
+    records (the fine-tuning record) that a resume must match.
     """
     return {
+        **(extra or {}),
         "format_version": 3,
         "config": config,
         "step": step,
@@ -191,6 +194,14 @@ def cosine_warmup(step: int, *, warmup_steps: int, total_steps: int) -> float:
         return (step + 1) / max(1, warmup_steps)
     progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
     return 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+
+
+def constant_warmup(step: int, *, warmup_steps: int) -> float:
+    """Linear warmup, then a constant rate: a step-``s`` checkpoint of a longer
+    run equals an ``s``-step run apart from the EMA (fine-tuning pilot)."""
+    if step < warmup_steps:
+        return (step + 1) / max(1, warmup_steps)
+    return 1.0
 
 
 def atomic_torch_save(value: dict, path: Path) -> None:

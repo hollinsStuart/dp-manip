@@ -28,6 +28,14 @@ class DataConfig:
     val_path: str
     num_demos: int
     val_num_demos: int
+    # Decode the selected episodes into RAM before training instead of
+    # decompressing gzip chunks per window. Runtime only: the samples are
+    # bit-identical either way, so it is not part of the control hash.
+    preload: bool
+
+
+# Pooling heads of ``dp_manip.vision.ResNet18Encoder``.
+VISION_POOLS = ("avg", "spatial_softmax")
 
 
 @dataclass
@@ -35,6 +43,11 @@ class VisionConfig:
     feature_dim: int
     random_shift: int
     share_camera_encoder: bool
+    # How the final ResNet feature map becomes ``feature_dim`` features:
+    # "avg" (global average pooling) or "spatial_softmax" (robomimic keypoints).
+    pool: str
+    # Keypoints of the spatial softmax; unused by "avg".
+    num_keypoints: int
 
 
 @dataclass
@@ -130,6 +143,8 @@ class Config:
             or self.data.val_num_demos < 1
         ):
             raise ValueError("data.val_num_demos must be positive")
+        if not isinstance(self.data.preload, bool):
+            raise ValueError("data.preload must be a boolean")
         policy = self.policy
         if not isinstance(policy.backbone, str) or not policy.backbone:
             raise ValueError("policy.backbone must be a non-empty string")
@@ -168,6 +183,16 @@ class Config:
             raise ValueError("inference diffusion iterations cannot exceed training iterations")
         if self.vision.feature_dim < 1 or self.vision.random_shift < 0:
             raise ValueError("invalid vision encoder settings")
+        if self.vision.pool not in VISION_POOLS:
+            raise ValueError(
+                f"vision.pool must be one of {list(VISION_POOLS)}, got {self.vision.pool!r}"
+            )
+        if (
+            isinstance(self.vision.num_keypoints, bool)
+            or not isinstance(self.vision.num_keypoints, int)
+            or self.vision.num_keypoints < 1
+        ):
+            raise ValueError("vision.num_keypoints must be a positive integer")
         train = self.train
         if min(train.total_iters, train.batch_size, train.log_freq, train.resume_freq) < 1:
             raise ValueError("training counts must be positive")
@@ -216,9 +241,16 @@ def default_run_name(cfg: Config) -> str:
     """Return the run directory name shared by the trainer and the sweep.
 
     The backbone is part of the name so different backbone arms with the same
-    task, data size, and seed never share a run directory.
+    task, data size, and seed never share a run directory. A non-default vision
+    pool adds a tag (``_ss32`` for a 32-keypoint spatial softmax); average
+    pooling adds none, so existing run directories keep their names and the
+    avg arm of a pooling comparison reuses the matching baseline run.
     """
-    return f"{cfg.task.name}_rgb_{cfg.policy.backbone}_n{cfg.data.num_demos}_s{cfg.train.seed}"
+    pool = "" if cfg.vision.pool == "avg" else f"_ss{cfg.vision.num_keypoints}"
+    return (
+        f"{cfg.task.name}_rgb_{cfg.policy.backbone}{pool}"
+        f"_n{cfg.data.num_demos}_s{cfg.train.seed}"
+    )
 
 
 @dataclass(frozen=True)
@@ -232,6 +264,10 @@ class ExperimentSpec:
     # Closed-loop ``--split train`` diagnostic budget: the first K training
     # seeds in ascending order. ``None`` evaluates the whole training subset.
     train_eval_episodes: int | None = None
+    # ``section.key -> value`` set in every cell (for example the data size a
+    # model comparison runs at). Like the variable, runtime overrides cannot
+    # change them, so every run of the grid trains at the declared values.
+    fixed: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def seeds_for(self, value: Any) -> tuple[int, ...]:
         try:
@@ -313,23 +349,49 @@ _HISTORICAL_VALUES: dict[tuple[str, str], Any] = {
     ("policy", "mlp_layers"): 3,
     ("policy", "mlp_time_embed_dim"): 128,
     ("policy", "mlp_obs_feat_dim"): 256,
+    # Before data.preload existed every run read RGB windows lazily from HDF5.
+    ("data", "preload"): False,
     # Before Phase 17 the trainer hard-coded AdamW betas (0.95, 0.999).
     ("train", "betas"): [0.95, 0.999],
+    # Before vision.pool existed the encoder always average-pooled; the
+    # keypoint count is inert under "avg" and matches today's baseline.
+    ("vision", "pool"): "avg",
+    ("vision", "num_keypoints"): 32,
 }
 
 
-def from_recorded(raw: dict[str, Any]) -> Config:
+def from_recorded(raw: dict[str, Any], overrides: Sequence[str] = ()) -> Config:
     """Rebuild the config of a recorded run (checkpoint, resume.pt or run.json).
 
     Unlike :func:`from_dict`, fields added after the run was recorded are filled
     with the values that run actually used, so older artifacts stay loadable.
+    ``overrides`` (``section.key=value``) are applied afterwards; fine-tuning
+    uses them to start from a baseline checkpoint's exact config.
     """
     raw = _adapt_legacy_config(raw)
     for (section, key), value in _HISTORICAL_VALUES.items():
         values = raw.get(section)
         if isinstance(values, dict) and key not in values:
             values[key] = copy.deepcopy(value)
+    for item in overrides:
+        key, value = _parse_override(item)
+        _set_dotted(raw, key, value)
     return from_dict(raw)
+
+
+# Keys that change how a run reads its data but never the samples it trains
+# on. Runs recorded lazily (preload=false, the default before Phase 21) are the
+# same run as a preloaded invocation, so they stay completed and resumable.
+_EXECUTION_ONLY = (("data", "preload"),)
+
+
+def same_run(recorded: Config, cfg: Config) -> bool:
+    """Whether a recorded run (``run.json`` / ``resume.pt``) is ``cfg``'s run."""
+    ours, theirs = recorded.to_dict(), cfg.to_dict()
+    for section, key in _EXECUTION_ONLY:
+        ours[section].pop(key, None)
+        theirs[section].pop(key, None)
+    return ours == theirs
 
 
 def from_dict(raw: dict[str, Any]) -> Config:
@@ -403,7 +465,7 @@ def load_experiment_optional(path: str | Path) -> ExperimentSpec | None:
 
 
 def _parse_experiment(raw: dict[str, Any]) -> ExperimentSpec:
-    unknown = set(raw) - {"experiment", "replicates", "diagnostics"}
+    unknown = set(raw) - {"experiment", "replicates", "diagnostics", "fixed"}
     if unknown:
         raise ValueError(f"unknown experiment sections: {sorted(unknown)}")
     experiment = raw.get("experiment", {})
@@ -437,8 +499,20 @@ def _parse_experiment(raw: dict[str, Any]) -> ExperimentSpec:
         or train_eval_episodes < 1
     ):
         raise ValueError("diagnostics.train_eval_episodes must be a positive integer")
+    fixed = raw.get("fixed", {})
+    if not isinstance(fixed, dict):
+        raise ValueError("[fixed] must be a table of quoted section.key entries")
+    for key in fixed:
+        _set_dotted(probe, key, fixed[key])
+        if key == variable:
+            raise ValueError(f"[fixed] cannot set the experiment variable {variable!r}")
     return ExperimentSpec(
-        str(experiment["name"]), variable, tuple(values), replicates, train_eval_episodes
+        str(experiment["name"]),
+        variable,
+        tuple(values),
+        replicates,
+        train_eval_episodes,
+        copy.deepcopy(fixed),
     )
 
 
@@ -525,6 +599,8 @@ def load(
                     raise ValueError(f"experiment {spec.name!r} requires an experiment value")
                 experiment_value = match_experiment_value(spec, experiment_value)
                 experiment_layer: dict[str, Any] = {}
+                for key, value in spec.fixed.items():
+                    _set_dotted(experiment_layer, key, copy.deepcopy(value))
                 _set_dotted(experiment_layer, spec.variable, experiment_value)
             else:
                 if experiment_value is not None:
@@ -542,6 +618,11 @@ def load(
             raise ValueError(
                 f"{key} is the variable of experiment {spec.name!r}; "
                 "choose it with the experiment value instead of an override"
+            )
+        if spec is not None and key in spec.fixed:
+            raise ValueError(
+                f"{key} is fixed to {spec.fixed[key]!r} by experiment {spec.name!r}; "
+                "edit the experiment spec instead of overriding it"
             )
         _set_dotted(raw, key, value)
     return from_dict(raw)
