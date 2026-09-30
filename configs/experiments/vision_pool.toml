@@ -1,0 +1,30 @@
+# Vision pooling comparison: global average pooling vs robomimic spatial softmax.
+#
+# The experiment variable only selects how the ResNet-18 layer4 map becomes the
+# per-camera feature; both heads project to vision.feature_dim, so the
+# observation encoder and every backbone are unchanged. Everything else,
+# including vision.num_keypoints, resolves from the canonical baseline, so the
+# two arms differ only in ``vision.pool``.
+#
+# Both arms train on N=200 demonstrations, selected exactly like the data-size
+# grid (the first 200 training demos by ascending episode seed). [fixed] pins
+# that value for every cell and rejects a runtime --num-demos. The avg arm is
+# therefore the data-size N=200 cell itself (same config, same run directory)
+# and is reused when its final.pt exists; spatial_softmax runs go to
+# ``<task>_rgb_unet_ss32_n200_s<seed>``.
+[experiment]
+name = "vision_pool"
+variable = "vision.pool"
+values = ["avg", "spatial_softmax"]
+
+[fixed]
+"data.num_demos" = 200
+
+[replicates]
+"avg" = [1, 2, 3]
+"spatial_softmax" = [1, 2, 3]
+
+[diagnostics]
+# Same shared overfitting diagnostic as the data-size grid: the first 25 demo
+# seeds are contained in the N=200 subset.
+train_eval_episodes = 25

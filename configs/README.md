@@ -31,6 +31,41 @@ config 只在 `policy.backbone` 上不同。N_B 默认使用 baseline 的 `data.
 `[diagnostics] train_eval_episodes = 25` 与 data-size grid 相同，用于在共有的前 25 个训练
 seed 上做过拟合诊断。
 
+视觉池化对比定义在 `experiments/vision_pool.toml`：`variable = "vision.pool"`、
+`values = ["avg", "spatial_softmax"]`，两个 arm 都使用种子 1–3。`vision.pool` 选择 ResNet-18
+layer4 特征图变成每相机特征的方式：`"avg"` 是基线的全局平均池化（参数名不变，旧 checkpoint
+原样加载）；`"spatial_softmax"` 按 robomimic 用 1×1 conv 得到 `vision.num_keypoints`（baseline
+32）张注意力图，在 H×W 上做 softmax（可学习温度，初值 1，softmax 与坐标期望在 AMP 下仍用 fp32），
+输出每个关键点的期望坐标 `(x, y) ∈ [-1, 1]`，再经 `Linear(2K, feature_dim)` 投影。两种 head
+的输出都是 `feature_dim`，observation encoder 和三个 backbone 不变。限制：128×128 输入到 layer4
+只剩 4×4，本实验按 robomimic 接在 layer4 上，是否改用 layer3 另行决定。
+
+spec 的 `[fixed]` 表给每个 cell 固定写入 `"section.key" = value`，这里是
+`"data.num_demos" = 200`：两个 arm 都用按 seed 升序取前 200 条的训练子集（与 data-size 轨道
+同一取法）。和实验变量一样，`[fixed]` 里的键不能再被运行时覆盖（`--num-demos` / `--set
+data.num_demos=...` 直接报错），`[fixed]` 也不能设置实验变量本身。
+
+`vision.num_keypoints` 不做豁免：两个 arm 都从 baseline 解析到同一个值，Gate B 不需要豁免；
+它会改变 spatial_softmax arm 的容量，是真正的控制量，改它应当是单独的实验
+（`variable = "vision.num_keypoints"`），而不是悄悄混进同一个矩阵。backbone 结构键的豁免只
+为 backbone 实验里的补充容量匹配 arm 保留。
+
+run 目录名：`avg` 不加标签，所以 avg arm 与 data-size 的 N=200 格子是同一个 run
+（`<task>_rgb_unet_n200_s<seed>`，已有 `final.pt` 时直接 `skipped` 复用）；spatial softmax
+加 `_ss<K>`，即 `<task>_rgb_unet_ss32_n200_s<seed>`。
+
+```bash
+python scripts/check_experiment.py --experiment vision_pool --task peginsertionside
+python scripts/sweep.py show --experiment configs/experiments/vision_pool.toml --task peginsertionside
+python scripts/run_experiment.py \
+  --task peginsertionside --experiment vision_pool --value spatial_softmax --seed 1 \
+  --data-root "$DATA_ROOT"
+sbatch --export=ALL,TASK=peginsertionside,EXPERIMENT=configs/experiments/vision_pool.toml,DATA_ROOT="$DATA_ROOT",RUN_ROOT=$RUN_ROOT \
+  slurm/train_dual_gpu.sbatch
+```
+
+`RUN_ROOT` 要与 data-size 轨道相同，avg arm 才会复用已有的 N=200 run。
+
 `experiments/smoke.toml` 是集群 smoke 用的缩小网格（`policy.backbone` 三个 arm × seed 1），
 训练预算通过 `--set train.total_iters=...` 等运行时覆盖传入，不写进正式实验定义；
 步骤见 `docs/cluster-smoke-test.zh-CN.md`。

@@ -36,6 +36,10 @@
       "change": "canonical_config.data gained the runtime switch preload=false (lazy HDF5 reads, as before); preloading only changes where the same bytes are read from, so training is unchanged"
     },
     {
+      "phase": 20,
+      "change": "canonical_config.vision gained pool=avg (the global average pooling the encoder always used) and num_keypoints=32 (read only by the optional spatial_softmax head); no scientific hyperparameter changed"
+    },
+    {
       "phase": 21,
       "change": "canonical_config.data.preload false -> true: RGB is decoded into RAM once instead of re-inflating gzip chunks per window (2.34x steps/s, job 135722); windows are bit-identical, and completion and resume ignore data.preload, so recorded lazy runs stay completed and resumable"
     }
@@ -60,7 +64,9 @@
     "vision": {
       "feature_dim": 128,
       "random_shift": 4,
-      "share_camera_encoder": true
+      "share_camera_encoder": true,
+      "pool": "avg",
+      "num_keypoints": 32
     },
     "policy": {
       "backbone": "unet",
