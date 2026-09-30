@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .config import VISION_POOLS
+
 
 def _groups(channels: int) -> int:
     for groups in (32, 16, 8, 4, 2):
@@ -37,11 +39,65 @@ class BasicBlock(nn.Module):
         return self.activation(value + residual)
 
 
-class ResNet18Encoder(nn.Module):
-    """ResNet-18 with GroupNorm and a compact output projection."""
+class SpatialSoftmax(nn.Module):
+    """robomimic-style spatial soft-argmax over a feature map.
 
-    def __init__(self, feature_dim: int):
+    A 1x1 convolution maps the input channels to ``num_keypoints`` attention
+    maps; a softmax over the ``H*W`` positions (learnable temperature, initial
+    value 1) turns each map into a distribution whose expected ``(x, y)`` image
+    coordinate in ``[-1, 1]`` is that keypoint. Returns ``(N, num_keypoints, 2)``.
+
+    The softmax and the coordinate expectation run in fp32 even under AMP.
+    The coordinate grid follows the input's spatial size, so no parameter
+    depends on the image resolution.
+    """
+
+    def __init__(self, in_channels: int, num_keypoints: int):
         super().__init__()
+        self.num_keypoints = num_keypoints
+        self.keypoints = nn.Conv2d(in_channels, num_keypoints, kernel_size=1)
+        self.temperature = nn.Parameter(torch.ones(1))
+
+    def forward(self, feature: torch.Tensor) -> torch.Tensor:
+        logits = self.keypoints(feature)
+        count, _, height, width = logits.shape
+        with torch.amp.autocast(logits.device.type, enabled=False):
+            logits = logits.float().reshape(count, self.num_keypoints, height * width)
+            attention = F.softmax(logits / self.temperature.float(), dim=-1)
+            pos_y, pos_x = torch.meshgrid(
+                torch.linspace(-1.0, 1.0, height, device=logits.device),
+                torch.linspace(-1.0, 1.0, width, device=logits.device),
+                indexing="ij",
+            )
+            positions = torch.stack((pos_x.reshape(-1), pos_y.reshape(-1)), dim=-1)
+            return attention @ positions
+
+
+class ResNet18Encoder(nn.Module):
+    """ResNet-18 with GroupNorm and a compact output projection.
+
+    ``pool`` selects how the final ``512``-channel map becomes a vector:
+
+    * ``"avg"``: global average pooling, then ``Linear(512, feature_dim)``
+      (the baseline; its parameter names are unchanged, so older checkpoints
+      load as-is);
+    * ``"spatial_softmax"``: :class:`SpatialSoftmax` with ``num_keypoints``
+      keypoints, flattened to ``2 * num_keypoints`` coordinates, then
+      ``Linear(2 * num_keypoints, feature_dim)``.
+
+    Both produce ``feature_dim`` features, so nothing downstream changes.
+
+    Limitation: like robomimic's ResNet18Conv, the spatial softmax reads
+    ``layer4``, which is only 4x4 for the 128x128 camera images used here
+    (total stride 32). The expected coordinates are still continuous, but the
+    attention has only 16 positions to choose from; whether to read ``layer3``
+    (8x8) instead is a separate decision.
+    """
+
+    def __init__(self, feature_dim: int, *, pool: str, num_keypoints: int):
+        super().__init__()
+        if pool not in VISION_POOLS:
+            raise ValueError(f"unknown vision pool {pool!r}; expected one of {list(VISION_POOLS)}")
         self.stem = nn.Sequential(
             nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=False),
             nn.GroupNorm(_groups(64), 64),
@@ -52,7 +108,14 @@ class ResNet18Encoder(nn.Module):
         self.layer2 = self._layer(64, 128, stride=2)
         self.layer3 = self._layer(128, 256, stride=2)
         self.layer4 = self._layer(256, 512, stride=2)
-        self.head = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(512, feature_dim))
+        if pool == "avg":
+            self.head = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(512, feature_dim))
+        else:
+            self.head = nn.Sequential(
+                SpatialSoftmax(512, num_keypoints),
+                nn.Flatten(),
+                nn.Linear(2 * num_keypoints, feature_dim),
+            )
         self.apply(self._initialize)
 
     @staticmethod
@@ -67,13 +130,16 @@ class ResNet18Encoder(nn.Module):
             nn.init.trunc_normal_(module.weight, std=0.02)
             nn.init.zeros_(module.bias)
 
-    def forward(self, image: torch.Tensor) -> torch.Tensor:
+    def feature_map(self, image: torch.Tensor) -> torch.Tensor:
+        """Return the ``layer4`` map the head pools, ``(N, 512, H/32, W/32)``."""
         value = self.stem(image)
         value = self.layer1(value)
         value = self.layer2(value)
         value = self.layer3(value)
-        value = self.layer4(value)
-        return self.head(value)
+        return self.layer4(value)
+
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
+        return self.head(self.feature_map(image))
 
 
 def random_shift(images: torch.Tensor, pad: int) -> torch.Tensor:

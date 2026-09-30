@@ -60,7 +60,7 @@ class MatrixCheckTest(unittest.TestCase):
         self.assertEqual(drifts[0].cell_value, 128)
 
     def test_declared_matrices_have_no_drift(self) -> None:
-        for name in ("data_size", "data_size_optional400", "backbone"):
+        for name in ("data_size", "data_size_optional400", "backbone", "vision_pool"):
             experiment = EXPERIMENTS / f"{name}.toml"
             spec = load_experiment(experiment)
             allowed = allowed_keys(spec)

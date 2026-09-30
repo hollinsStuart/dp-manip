@@ -15,6 +15,10 @@ preload = true
 feature_dim = 128
 random_shift = 4
 share_camera_encoder = true
+# "avg" (global average pooling) or "spatial_softmax" (robomimic keypoints on
+# layer4); both project to feature_dim. num_keypoints is used only by the latter.
+pool = "avg"
+num_keypoints = 32
 
 [policy]
 backbone = "unet"

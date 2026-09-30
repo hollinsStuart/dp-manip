@@ -50,12 +50,15 @@ class ObservationEncoder(nn.Module):
         self.proprio_dim = proprio_dim
         self.random_shift_pad = vision_cfg.random_shift
         self.share_camera_encoder = vision_cfg.share_camera_encoder
-        if self.share_camera_encoder:
-            self.image_encoders = nn.ModuleList([ResNet18Encoder(vision_cfg.feature_dim)])
-        else:
-            self.image_encoders = nn.ModuleList(
-                ResNet18Encoder(vision_cfg.feature_dim) for _ in range(self.num_cameras)
+        def image_encoder() -> ResNet18Encoder:
+            return ResNet18Encoder(
+                vision_cfg.feature_dim, pool=vision_cfg.pool, num_keypoints=vision_cfg.num_keypoints
             )
+
+        if self.share_camera_encoder:
+            self.image_encoders = nn.ModuleList([image_encoder()])
+        else:
+            self.image_encoders = nn.ModuleList(image_encoder() for _ in range(self.num_cameras))
         self.register_buffer("proprio_mean", torch.as_tensor(stats.proprio_mean))
         self.register_buffer("proprio_std", torch.as_tensor(stats.proprio_std))
 

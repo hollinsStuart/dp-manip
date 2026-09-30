@@ -89,7 +89,9 @@ def make_stats(proprio_dim: int, action_dim: int) -> "NormalizationStats":
 def make_policy(backbone: str = "unet") -> "DiffusionPolicy":
     return DiffusionPolicy(
         make_policy_config(backbone=backbone),
-        VisionConfig(feature_dim=8, random_shift=0, share_camera_encoder=True),
+        VisionConfig(
+            feature_dim=8, random_shift=0, share_camera_encoder=True, pool="avg", num_keypoints=32
+        ),
         DiffusionConfig(num_diffusion_iters=8, num_inference_iters=2),
         image_shape=(32, 32, 6),
         proprio_dim=5,

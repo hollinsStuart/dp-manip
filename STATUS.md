@@ -116,6 +116,24 @@
   `training.py` / `trainer.py` 职责互相注明，canonical 代码的 unused import
   扫描干净（仅 `__future__ annotations` 与 `envs.py` 里显式标注的 ManiSkill 注册 import）。
   按 §25 未做 `dp_manip`→`dp_policy` 等大规模目录 rename，也未引入新的 lint 工具链。
+- Phase 20 已把视觉编码器的池化做成可切换配置：`vision.pool`（`"avg"` | `"spatial_softmax"`，
+  baseline 保持 `"avg"`）与 `vision.num_keypoints`（baseline 32，只在 spatial softmax 下使用），
+  `Config.validate` 拒绝未知 pool 和 `num_keypoints < 1`，`from_recorded` 给旧 checkpoint /
+  `run.json` / `resume.pt` 补 `avg` / 32。`dp_manip/vision.py` 新增 robomimic 式
+  `SpatialSoftmax`（1×1 conv → H×W softmax，可学习温度初值 1，fp32 计算期望坐标），接在 layer4
+  上并投影回 `feature_dim`，encoder 以外不变；avg 分支结构与参数名不变。已知限制：128×128 输入
+  的 layer4 只有 4×4，是否改用 layer3 另行决定。新增实验 `configs/experiments/vision_pool.toml`
+  （两 arm × 种子 1–3，spec 新增的 `[fixed]` 表把 `data.num_demos` 固定为 200 且禁止运行时覆盖）；
+  avg arm 与 data-size N=200 格子同名同 config，直接复用，spatial softmax 的 run 名为
+  `<task>_rgb_unet_ss32_n200_s<seed>`。`num_keypoints` 不豁免 Gate B（理由见
+  `configs/README.md`）。Phase 0 manifest 升到 schema version 10，只新增 vision 两个字段。
+  `tests/test_vision_pool.py` 覆盖两种 pool 输出 shape、关键点落在 [-1, 1]、AMP 下 fp32、
+  forward/backward/optimizer step、非法值被拒、无 pool 字段的旧 checkpoint 经
+  `DiffusionPolicy.from_checkpoint` 按 avg 加载且动作逐位相同、矩阵 Gate B 与 `[fixed]`；
+  六任务 vision_pool 矩阵 36 cells `Gate B ok`。本机 CPU 合成数据（PegInsertionSide 形状，
+  200/50 条 128×128 示范）经 `run_experiment.py` 实测 spatial_softmax arm 的
+  train → SIGUSR1（exit 75）→ resume → load → get_action 通过，`--run-root` 对账无 drift。
+  未改 baseline 默认值，未重跑已有实验。
 - Phase 21 把 `data.preload` 设为默认 `true`（job 135722：lazy 逐窗口解 gzip 使 CPU 85%、GPU 51%；
   preload 后 GPU 88%、吞吐 2.34×，train_loss 逐位一致）。`RGBWindowDataset` 默认预加载，
   finetune 去掉多余的 preload override。完成判断（`completion_state`）与 resume 检查改用
