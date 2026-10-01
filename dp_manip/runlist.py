@@ -39,6 +39,8 @@ TASKS = (
     "pullcube",
     "peginsertionside",
     "plugcharger",
+    "placesphere",
+    "liftpegupright",
 )
 DEFAULT_EXPERIMENT = ROOT / "configs" / "experiments" / "data_size.toml"
 

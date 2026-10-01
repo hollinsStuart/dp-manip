@@ -1,6 +1,6 @@
 # dp-manip：集群 RGB Diffusion Policy
 
-本目录是六个 ManiSkill 任务的 **RGB-based Diffusion Policy** 训练与评估工程。数据由
+本目录是八个 ManiSkill 任务的 **RGB-based Diffusion Policy** 训练与评估工程。数据由
 `maniskill-demogen` 生成；训练/评估面向 Linux GPU 集群。当前 QOS 每用户只允许 **1 个已提交
 作业**，单作业最多 2 张 GPU，因此生产入口是**一个双 GPU 作业内的动态队列**（两个 worker
 各绑定一张 GPU，先完成的 worker 立即领取下一个 run），不再使用 Job Array。
@@ -10,7 +10,7 @@
 按示范 seed 升序排序后的前 N 条，与 HDF5 导出顺序和 `episode_id` 无关；因此不同训练
 种子看到完全相同的示范，种子间方差只反映优化随机性。
 
-## 六个任务
+## 八个任务
 
 | 配置 | 环境 | 控制模式 | 动作维 | 评估步数 |
 | --- | --- | --- | ---: | ---: |
@@ -20,8 +20,13 @@
 | `tasks/pullcube.toml` | PullCube-v1 | `pd_ee_delta_pos` | 4 | 100 |
 | `tasks/peginsertionside.toml` | PegInsertionSide-v1 | `pd_joint_pos` | 8 | 300 |
 | `tasks/plugcharger.toml` | PlugCharger-v1 | `pd_joint_pos` | 8 | 200 |
+| `tasks/placesphere.toml` | PlaceSphere-v1 | `pd_ee_delta_pos` | 4 | 50 |
+| `tasks/liftpegupright.toml` | LiftPegUpright-v1 | `pd_joint_pos` | 8 | 50 |
 
-PegInsertionSide 与 PlugCharger 使用 `pd_joint_pos`，与 `maniskill-demogen/tasks.py` 的最终数据一致。
+PlaceSphere 和 LiftPegUpright 的新配置沿用全部 baseline 与实验网格；50 步评估上限来自
+ManiSkill 3.0.1 环境注册值。已接入 demogen 官方专家入口，尚待真实回放验证。
+
+PegInsertionSide、PlugCharger 与 LiftPegUpright 使用 `pd_joint_pos`，与 `maniskill-demogen/tasks.py` 的最终数据一致。
 绝对关节目标会先按训练子集做 min-max 归一化，执行时还原，不裁剪到 `[-1, 1]`。
 
 ## 数据契约
@@ -74,7 +79,7 @@ export RUN_ROOT=$HOME/dp-runs
 # 1. 登录节点建环境
 ./setup.sh
 
-# 2. 在提交作业前检查六套数据（DATA_ROOT 指向 demogen 的 data/dataset）
+# 2. 在提交作业前检查八套数据（DATA_ROOT 指向 demogen 的 data/dataset）
 .venv/bin/python scripts/inspect_dataset.py --data-root "$DATA_ROOT"
 
 # 3. Gate B：确认每个实验矩阵的 resolved config 只在声明的实验变量上不同
