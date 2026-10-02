@@ -29,7 +29,7 @@ def check_nested_subsets(path: Path, full: DatasetInfo, sizes: Sequence[int]) ->
             raise ValueError(f"{path}: N={size} is not the first {size} demos ordered by episode seed")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", action="append", type=Path, help="repeatable; default: all task configs")
     parser.add_argument("--data-root", type=Path, required=True)
@@ -40,7 +40,15 @@ def main() -> None:
         default=DATA_SIZE_EXPERIMENT,
         help="data-size spec whose values must form nested training subsets",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="config override (repeatable), e.g. task.control_mode=pd_ee_delta_pose",
+    )
+    args = parser.parse_args(argv)
     configs = args.config or sorted((ROOT / "configs" / "tasks").glob("*.toml"))
     spec = load_experiment(args.experiment)
     if spec.variable != "data.num_demos":
@@ -49,7 +57,9 @@ def main() -> None:
     failures = 0
     for config_path in configs:
         try:
-            overrides = [] if args.num_demos is None else [f"data.num_demos={args.num_demos}"]
+            overrides = list(args.overrides)
+            if args.num_demos is not None:
+                overrides.append(f"data.num_demos={args.num_demos}")
             cfg = load(config_path, overrides)
             train_path = args.data_root / cfg.data.train_path
             val_path = args.data_root / cfg.data.val_path
