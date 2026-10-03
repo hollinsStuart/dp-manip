@@ -20,11 +20,15 @@
 | `tasks/pullcube.toml` | PullCube-v1 | `pd_ee_delta_pos` | 4 | 100 |
 | `tasks/peginsertionside.toml` | PegInsertionSide-v1 | `pd_joint_pos` | 8 | 300 |
 | `tasks/plugcharger.toml` | PlugCharger-v1 | `pd_joint_pos` | 8 | 200 |
-| `tasks/placesphere.toml` | PlaceSphere-v1 | `pd_ee_delta_pos` | 4 | 50 |
-| `tasks/liftpegupright.toml` | LiftPegUpright-v1 | `pd_joint_pos` | 8 | 50 |
+| `tasks/placesphere.toml` | PlaceSphere-v1 | `pd_ee_delta_pos` | 4 | 200 |
+| `tasks/liftpegupright.toml` | LiftPegUpright-v1 | `pd_joint_pos` | 8 | 50（待定） |
 
-PlaceSphere 和 LiftPegUpright 的新配置沿用全部 baseline 与实验网格；50 步评估上限来自
-ManiSkill 3.0.1 环境注册值。已接入 demogen 官方专家入口，尚待真实回放验证。
+PlaceSphere 和 LiftPegUpright 的新配置沿用全部 baseline 与实验网格。评估步数不能直接用
+ManiSkill 的注册值（两者都是 50）：PlaceSphere 的示范有 90–150 步，50 步时评估全部失败，
+现改为 200；2026-10-03 之前训练的 PlaceSphere run 记录的是 50，评估时加
+`--max-episode-steps 200`。LiftPegUpright 的 50 尚未按示范长度核对，生成数据后按
+[任务负责人操作手册](docs/task-owner-runbook.zh-CN.md) §3 确定。训练启动时若评估步数短于最长
+示范，会直接报错。
 
 PegInsertionSide、PlugCharger 与 LiftPegUpright 使用 `pd_joint_pos`，与 `maniskill-demogen/tasks.py` 的最终数据一致。
 绝对关节目标会先按训练子集做 min-max 归一化，执行时还原，不裁剪到 `[-1, 1]`。

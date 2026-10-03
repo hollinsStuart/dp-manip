@@ -69,6 +69,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="horizon of every closed-loop stage (plan §1, §13); reads eval/val_final_h<N>.json. "
         "Default: the checkpoints' recorded horizon and eval/val_final.json",
     )
+    cell.add_argument(
+        "--no-low-success",
+        action="store_true",
+        help="stop instead of entering low-success mode when no cell is in the band (plan §12.3, replication task)",
+    )
     collection = command("record-collection", "lock one checkpoint's built datasets")
     collection.add_argument("--seed", type=int, required=True)
     command("pilot", "choose lr/steps from the offline pilot (plan §4.4)", torch_device=True)
@@ -126,7 +131,9 @@ def select_cell(args, lock: LockFile, protocol: FailureProtocol) -> None:
             f"N=100 {study.val_result_name(horizon)} of seeds {cell.val_seeds} are missing under {args.run_root}"
         )
     n200 = study.read_val_success(args.run_root, args.task, 200, cell.val_seeds, horizon)
-    choice = study.select_baseline_cell(n100, n200, low=cell.min_val_success, high=cell.max_val_success)
+    choice = study.select_baseline_cell(
+        n100, n200, low=cell.min_val_success, high=cell.max_val_success, allow_low_success=not args.no_low_success
+    )
     checkpoints = {}
     for seed in cell.checkpoint_seeds:
         path = study.baseline_run_dir(args.run_root, args.task, choice["num_demos"], seed) / "checkpoints" / "final.pt"
@@ -145,6 +152,7 @@ def select_cell(args, lock: LockFile, protocol: FailureProtocol) -> None:
             "val_success_n200": n200,
             "max_episode_steps": horizon,
             "val_results": study.val_result_name(args.max_episode_steps),
+            "low_success_allowed": not args.no_low_success,
             "protocol_sha256": protocol.sha256,
             "rollout_root": str(args.rollout_root.resolve()) if args.rollout_root else None,
         },

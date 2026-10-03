@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from dp_manip.config import load, load_experiment  # noqa: E402
 from dp_manip.data import DatasetInfo, compute_normalization, read_dataset_info  # noqa: E402
+from dp_manip.trainer import check_horizon  # noqa: E402
 
 DATA_SIZE_EXPERIMENT = ROOT / "configs" / "experiments" / "data_size.toml"
 
@@ -78,13 +79,17 @@ def main(argv: list[str] | None = None) -> None:
                 val.cameras,
             ):
                 raise ValueError("training and validation schemas differ")
+            check_horizon(cfg, train, val)
+            lengths = [episode.length for info in (train, val) for episode in info.episodes]
             stats = compute_normalization(train)
             print(
                 f"PASS {cfg.task.env_id}: train {len(train.episodes)} demos/{train.num_transitions} steps; "
                 f"val {len(val.episodes)}; obs_mode {train.obs_mode}; "
                 f"images {train.image_shape} {list(train.cameras)}; "
                 f"lowdim {train.proprio_dim}; action {train.action_dim} ({train.control_mode}); "
-                f"action range [{stats.action_low.min():.3f}, {stats.action_high.max():.3f}]"
+                f"action range [{stats.action_low.min():.3f}, {stats.action_high.max():.3f}]; "
+                f"demo length {min(lengths)}-{sum(lengths) / len(lengths):.0f}-{max(lengths)} "
+                f"(min-mean-max), max_episode_steps {cfg.task.max_episode_steps}"
             )
         except Exception as error:
             failures += 1

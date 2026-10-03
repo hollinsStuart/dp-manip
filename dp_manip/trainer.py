@@ -11,6 +11,7 @@ live in ``dp_manip.training``.
 from __future__ import annotations
 
 import json
+import math
 import platform
 import random
 import signal
@@ -92,6 +93,25 @@ def check_dataset(
         raise ValueError("training demonstrations must use seeds below 4000")
     if split == "val" and any(not 4_000 <= seed < 5_000 for seed in info.seeds):
         raise ValueError("validation demonstrations must use seeds in [4000, 5000)")
+
+
+def check_horizon(cfg: Config, *infos: DatasetInfo) -> None:
+    """Refuse an evaluation horizon shorter than the longest demonstration.
+
+    Training itself never uses ``task.max_episode_steps``, but every checkpoint
+    records it and evaluation stops there: PlaceSphere's demonstrations are
+    90-150 steps, and its registered 50-step default made every evaluation fail.
+    """
+    lengths = [episode.length for info in infos for episode in info.episodes]
+    if not lengths or cfg.task.max_episode_steps >= max(lengths):
+        return
+    suggested = math.ceil(max(max(lengths), 2 * sum(lengths) / len(lengths)) / 50) * 50
+    raise ValueError(
+        f"task.max_episode_steps={cfg.task.max_episode_steps} is shorter than the longest demonstration "
+        f"({max(lengths)} steps): every evaluation episode would stop before the expert finishes. "
+        f"Set max_episode_steps in configs/tasks/{cfg.task.name}.toml, e.g. {suggested} "
+        "(2 x mean demonstration length, rounded up to 50; docs/final-plan.md §1)"
+    )
 
 
 def dataset_record(info: DatasetInfo) -> dict:
@@ -227,6 +247,10 @@ def run_training(
     )
     check_dataset(train_info, cfg, "train", finetune.train_seed_range if finetune else None)
     check_dataset(val_info, cfg, "val", finetune.val_seed_range if finetune else None)
+    if finetune is None:
+        # Fine-tuning reuses the baseline's recorded config, whose horizon the
+        # failure-aware study overrides at evaluation time (failure-aware plan §13).
+        check_horizon(cfg, train_info, val_info)
     if init_checkpoint is not None and finetune_record is not None:
         for split, info in (("train", train_info), ("val", val_info)):
             finetune_lib.check_rollout_source(info, finetune_record["init_checkpoint_sha256"], split)

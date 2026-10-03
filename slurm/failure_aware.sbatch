@@ -21,7 +21,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=24:00:00
+# 18 h is the debug partition's MaxTime; a longer step is requeued and resumes.
+#SBATCH --time=18:00:00
 #SBATCH --signal=B:USR1@120
 #SBATCH --requeue
 #SBATCH --output=slurm-%x-%A.out

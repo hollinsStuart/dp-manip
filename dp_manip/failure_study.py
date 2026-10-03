@@ -64,9 +64,13 @@ def read_val_success(
 
 
 def select_baseline_cell(
-    n100: Sequence[float], n200: Sequence[float] | None, *, low: float, high: float
+    n100: Sequence[float], n200: Sequence[float] | None, *, low: float, high: float, allow_low_success: bool = True
 ) -> dict[str, Any]:
-    """Plan §1: N=100 if its mean is in [low, high), else N=200, else low-success mode."""
+    """Plan §1: N=100 if its mean is in [low, high), else N=200, else low-success mode.
+
+    Without ``allow_low_success`` the last case is an error: the replication
+    task is not run outside the band (plan §12.3).
+    """
     mean100 = statistics.fmean(n100)
     if mean100 >= high:
         raise ValueError(f"N=100 mean validation success {mean100:.3f} >= {high}: too few failures")
@@ -81,6 +85,11 @@ def select_baseline_cell(
         return {"num_demos": 200, "mode": "normal", "mean_val_success": mean200}
     if mean200 >= high:
         raise ValueError(f"N=200 mean validation success {mean200:.3f} >= {high}")
+    if not allow_low_success:
+        raise ValueError(
+            f"mean validation success N=100 {mean100:.3f}, N=200 {mean200:.3f}: neither is in [{low}, {high}); "
+            "low-success mode is disabled, so the study is not run on this task (plan §12.3)"
+        )
     best = (200, mean200) if mean200 > mean100 else (100, mean100)
     return {"num_demos": best[0], "mode": "low-success", "mean_val_success": best[1]}
 

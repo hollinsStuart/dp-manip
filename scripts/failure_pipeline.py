@@ -25,7 +25,9 @@ crash. The study and a smoke run differ only in their arguments:
       --max-episode-steps 200
 
 ``--max-episode-steps`` is locked by select-cell on the first run; later runs
-may omit it, and a value that differs from the lock is refused.
+may omit it, and a value that differs from the lock is refused. The replication
+task (plan §12) adds ``--no-low-success``, so it stops when its baseline is
+outside the band instead of running in low-success mode.
 """
 
 from __future__ import annotations
@@ -69,6 +71,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-episode-steps",
         type=study_cli.positive_int,
         help="study horizon passed to select-cell (plan §1, §13); default: the checkpoints' recorded one",
+    )
+    parser.add_argument(
+        "--no-low-success",
+        action="store_true",
+        help="passed to select-cell: stop if no baseline cell is in the band (plan §12.3, replication task)",
     )
     parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
     parser.add_argument("--lock", type=Path, help="default: configs/failure_aware/<task>.toml (study protocol only)")
@@ -159,6 +166,7 @@ class Pipeline:
             self.study(
                 "select-cell", "--run-root", str(self.args.run_root), "--rollout-root", str(self.rollout_root),
                 *(["--max-episode-steps", str(horizon)] if horizon is not None else []),
+                *(["--no-low-success"] if self.args.no_low_success else []),
             )
         locked_horizon = study.study_horizon(self.lock)
         if self.args.max_episode_steps is not None and self.args.max_episode_steps != locked_horizon:

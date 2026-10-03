@@ -587,7 +587,7 @@ where `m` is the mean of `(1 − c_k)/2` over all denoising steps, measured in a
 2. Pick the α with the highest pooled `success_once`; ties within 2 episodes go to the **smaller** α. If the winner is at the edge of the grid, report that; the grid is not extended.
 3. The same selected α is used for all checkpoints of that arm.
 4. F vs A: the arm whose selected α has the higher pooled tuning success becomes "the guidance arm" for H1/H2 and fixes C1's guidance mode; ties go to F (the simpler one).
-5. For the later LiftPegUpright replication, how α is transferred or re-tuned is defined in §12.
+5. LiftPegUpright runs its own selection with the same rules (§12.3); nothing is transferred between tasks.
 
 Arm B is not run on the tuning set: selection only compares α values within an arm and F against A.
 
@@ -1019,6 +1019,7 @@ Change log (all before any failure-aware run):
 - 2026-10-03 — **study horizon** 200 steps for PlaceSphere (row 11): the checkpoints record 50, which truncates every episode before success (demonstrations median 113 steps). The main-track results use 200, so the study does too. Implemented by the §13 code changes.
 - 2026-10-03 — **replication task** PlugCharger → LiftPegUpright (§12), following the pre-registered fallback in `docs/final-plan.md` §1.
 - 2026-10-03 — **budget re-projected** for 200-step episodes from the measured PegInsertionSide rollout cost (§10): ≈ 9.7 typical / 12.4 worst GPU-h; cap stays 24. Arm B is always run by the study; the earlier "reuse from the main track" saving was never implemented.
+- 2026-10-03 — **LiftPegUpright runs the full design** (§12.3–12.5), independently of PlaceSphere; the reduced replication with transferred hyperparameters was never implemented and is dropped. Supporting changes: `select-cell --no-low-success` (the replication task stops outside the band), training refuses a horizon shorter than the longest demonstration, `configs/tasks/placesphere.toml` now records 200 steps, and `slurm/failure_aware.sbatch` requests the debug partition's 18 h MaxTime instead of 24 h.
 
 | # | Parameter | Value | Section |
 | --- | --- | --- | --- |
@@ -1058,7 +1059,7 @@ Defaults (no discussion needed, listed so they are not changed silently):
 
 ## 12. Extension Interface: LiftPegUpright (replication task)
 
-No LiftPegUpright run is part of the current study. This section fixes what the implementation must look like so that LiftPegUpright (or any other task) can be added later by writing configuration only. Until 2026-10-03 the planned extension was PlugCharger-v1; it was replaced together with the main task (§11 change log). LiftPegUpright is the fallback for PlugCharger pre-registered in `docs/final-plan.md` §1, and it adds a skill PlaceSphere does not test: reorienting a grasped object.
+LiftPegUpright is run by its task owner as a second, independent study (§12.3). This section fixes what the implementation must look like so that LiftPegUpright (or any other task) needs configuration only. Until 2026-10-03 the planned extension was PlugCharger-v1; it was replaced together with the main task (§11 change log). LiftPegUpright is the fallback for PlugCharger pre-registered in `docs/final-plan.md` §1, and it adds a skill PlaceSphere does not test: reorienting a grasped object.
 
 ### 12.1 Task-agnostic requirements (apply now)
 
@@ -1080,7 +1081,7 @@ No LiftPegUpright run is part of the current study. This section fixes what the 
   [task]                 # name, baseline cell N, mode (normal | low-success), val success per seed
   [checkpoints.s1]       # path, sha256 (one table per ckpt seed)
   [collection.s1]        # rollouts, successes, failures, K, L_fail, low_success, summary sha256
-  [finetune]             # lr, steps, source = "pilot" | "transferred:<task>", pilot candidates and margins
+  [finetune]             # lr, steps, source = "pilot", pilot candidates and margins
   [models.s1]            # failure / success model paths and sha256
   [gate]                 # passed; per ckpt seed: losses, gap_fail, gap_succ, pass
   [guidance.dry_run]     # m, mean cosine, alpha0_reproduces_baseline
@@ -1091,51 +1092,41 @@ No LiftPegUpright run is part of the current study. This section fixes what the 
   `dp_manip/failure_lock.py` writes each section once and refuses to replace it. GPU-hours are not locked (they grow); `failure_study.py status` sums them from the rollout, fine-tuning and evaluation records.
 
   Test results live in the evaluation JSON files, never in the lock file. Evaluation scripts read checkpoints, α and guidance mode **only** from the lock file (§8 Phase 4, criterion 3).
-- **Tests cover both tasks from the start.** Config-resolution and lock-file tests, and the synthetic-data dataset/rollout-schema tests, are parametrized over `placesphere` and `liftpegupright`, so the LiftPegUpright path is exercised even though it is not run. They currently cover `peginsertionside` and `plugcharger` (§13).
+- **Tests cover both tasks from the start.** The protocol tests and the synthetic-data end-to-end study run over `placesphere` and `liftpegupright`, so the LiftPegUpright path is exercised before it runs on the cluster.
 
 ### 12.2 PlaceSphere lock file
 
 `configs/failure_aware/placesphere.toml` is written during §8 Phase 5 by the runbook's commands: `[task]` and `[checkpoints]` in step 1, `[collection.*]` in steps 2 and 4, `[finetune]` in step 3, `[models.*]` in step 5, `[gate]` in step 6, `[guidance.*]` in steps 7–8. It is committed before the test evaluation (step 9).
 
-### 12.3 What transfers to LiftPegUpright and what is re-derived
+### 12.3 LiftPegUpright design: the full protocol, run independently
 
-Default extension design: a **reduced replication with transferred hyperparameters**. It tests whether the method, tuned on PlaceSphere, works on a second task without re-tuning, and it is the cheapest option.
+Decided 2026-10-03: LiftPegUpright runs the **full design**, the same protocol as PlaceSphere with every task-specific value re-derived on LiftPegUpright. Nothing is transferred from the PlaceSphere lock file, so the two studies do not depend on each other's order or outcome, and the existing pipeline runs it without code changes. (The earlier default, a reduced replication with transferred lr, steps and α, was never implemented and is dropped.)
 
 | Item | LiftPegUpright |
 | --- | --- |
-| Study horizon | re-derived from LiftPegUpright's demonstration lengths with the main track's rule, before any LiftPegUpright evaluation; the config's 50 is ManiSkill's registered default and may truncate episodes as it did for PlaceSphere |
-| Baseline cell, low-success mode | re-derived with the §1 rule on LiftPegUpright's own validation results at that horizon |
+| Study horizon | derived from LiftPegUpright's demonstration lengths before training (`docs/task-owner-runbook.zh-CN.md` §3); training refuses a horizon shorter than the longest demonstration. Locked by `select-cell --max-episode-steps` only if the trained checkpoints record a different value |
+| Baseline cell | the §1 rule on LiftPegUpright's own validation results at that horizon, with `select-cell --no-low-success`: if no cell is in [0.15, 0.85) the study stops (see below) |
 | Checkpoints | training seeds 1–3 of that cell |
-| K, rollout cap, truncation factor, seed ranges, episode counts | same as PlaceSphere |
-| `L_fail` | re-derived from LiftPegUpright's own success lengths |
-| Fine-tune lr and steps | transferred from the PlaceSphere lock file (no pilot) |
-| `m` | re-measured (8-episode success-blind dry run) |
-| Guidance arm (F or A) | transferred |
-| α | the selected grid value from `{0.5, 1, 2}` is transferred; the adaptive arm divides it by LiftPegUpright's own `m`; C1's grid value is transferred the same way |
-| Offline gate | re-run on LiftPegUpright's holdout |
-| Test arms | B, guidance arm, C1; C2 only if budget allows |
-| Hypotheses | H1 and H2, reported as a replication; H3 not tested |
+| Protocol values (K, rollout cap, truncation factor, seed ranges, pilot grid, α grid, episode counts) | `configs/failure_aware/protocol.toml`, same file as PlaceSphere |
+| `L_fail` | from LiftPegUpright's own success lengths |
+| Fine-tune lr and steps | LiftPegUpright's own offline pilot (§4.4) |
+| `m`, α, F vs A, C1's α | LiftPegUpright's own dry run and tuning sweep (§5.5) |
+| Offline gate | on LiftPegUpright's holdout (§6.7) |
+| Test arms and hypotheses | B, F, A, C1, C2; H1–H3 as in §6.2 |
 
-The two tasks differ in control mode (`pd_ee_delta_pos`, 4-dim vs `pd_joint_pos`, 8-dim), so transferring lr, steps and α is itself part of what the replication tests. A failed replication is reported as such, not followed by re-tuning.
+Each task's results are reported and tested separately; there is no pooling across tasks. If both tasks support H1 (and H2), the report may say the effect replicated; if only one does, it reports the split. The two tasks differ in control mode (`pd_ee_delta_pos`, 4-dim vs `pd_joint_pos`, 8-dim), which the report states when comparing them.
 
-The alternative is the **full design** on LiftPegUpright (own pilot and α sweep, as in §4.4 and §5.5). Which of the two designs is used must be written into `configs/failure_aware/liftpegupright.toml` before any LiftPegUpright collection starts.
-
-If LiftPegUpright's baseline falls outside the §1 band (no normal-mode cell), the replication is not run and the report says why; no other task is substituted.
+If LiftPegUpright's baseline falls outside the §1 band (no normal-mode cell), the study is not run on it and the report says why; no other task is substituted. `--no-low-success` enforces this, so a near-zero baseline cannot fall into low-success mode.
 
 ### 12.4 Budget estimate
 
-Assuming a 200-step horizon and the §10.1 unit costs; rescale the rollout rows linearly once the horizon is fixed. Fine-tuning costs the same as for PlaceSphere.
-
-| Design | Typical GPU-h | Worst GPU-h |
-| --- | ---: | ---: |
-| Reduced replication (default) | ≈ 5.2 | ≈ 8.8 |
-| Full design | ≈ 9.7 | ≈ 12.4 |
+The full design costs the same as PlaceSphere (§10.2): ≈ 9.7 typical / ≈ 12.4 worst GPU-hours at a 200-step horizon. Rollout rows scale linearly with the horizon once it is fixed; fine-tuning does not depend on it. It is charged to the LiftPegUpright owner's own quota and capped at 24 GPU-hours like the PlaceSphere study, with the same cut order (§10.3).
 
 ### 12.5 Prerequisites
 
-- The PlaceSphere lock file is complete (it supplies the transferred values).
-- LiftPegUpright's demonstrations are generated and its horizon is fixed; its main-track `unet_n100` seeds 1–5 (and `unet_n200` if the §1 rule falls back) are finished with validation rollouts at that horizon.
-- A separate budget is approved; the extension does not draw on the 24 GPU-hours of §10.
+- LiftPegUpright's demonstrations are generated, its horizon is fixed in `configs/tasks/liftpegupright.toml`, and its main-track `unet_n100` and `unet_n200` seeds 1–5 are trained and evaluated on the validation split at that horizon.
+- A cluster smoke of the failure pipeline on LiftPegUpright (`smoke_protocol.toml`, §8) has passed, including the `α = 0` check.
+- The PlaceSphere study is **not** a prerequisite.
 
 ## 13. Code Changes for the PlaceSphere Study (implemented 2026-10-03)
 

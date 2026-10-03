@@ -2,6 +2,9 @@
 name = "liftpegupright"
 env_id = "LiftPegUpright-v1"
 control_mode = "pd_joint_pos"
+# 50 is ManiSkill's registered default, not yet checked against the demonstrations.
+# Set it from the generated demo lengths before training (docs/task-owner-runbook.zh-CN.md §3);
+# training refuses a horizon shorter than the longest demonstration.
 max_episode_steps = 50
 
 [data]

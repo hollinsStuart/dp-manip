@@ -101,7 +101,7 @@ val_path = "val.h5"
     def test_new_tasks_reuse_baseline(self) -> None:
         baseline = load(TASKS / "pickcube.toml").to_dict()
         for name, env_id, horizon, mode in (
-            ("placesphere", "PlaceSphere-v1", 50, "pd_ee_delta_pos"),
+            ("placesphere", "PlaceSphere-v1", 200, "pd_ee_delta_pos"),
             ("liftpegupright", "LiftPegUpright-v1", 50, "pd_joint_pos"),
         ):
             with self.subTest(task=name):
