@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate RGB dataset schemas and nested data-size subsets before submitting jobs."""
+"""Validate observation schemas and nested data-size subsets before submitting jobs."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def check_nested_subsets(path: Path, full: DatasetInfo, sizes: Sequence[int]) ->
             raise ValueError(
                 f"{path}: data-size grid asks for {size} demos, pool has {len(full.episodes)}"
             )
-        subset_seeds = read_dataset_info(path, size).seeds
+        subset_seeds = read_dataset_info(path, size, obs_mode=full.obs_mode).seeds
         if subset_seeds != full.seeds[:size]:
             raise ValueError(f"{path}: N={size} is not the first {size} demos ordered by episode seed")
 
@@ -63,10 +63,10 @@ def main(argv: list[str] | None = None) -> None:
             cfg = load(config_path, overrides)
             train_path = args.data_root / cfg.data.train_path
             val_path = args.data_root / cfg.data.val_path
-            train = read_dataset_info(train_path, args.num_demos)
+            train = read_dataset_info(train_path, args.num_demos, obs_mode=cfg.task.obs_mode)
             if args.num_demos is None:
                 check_nested_subsets(train_path, train, grid)
-            val = read_dataset_info(val_path, cfg.data.val_num_demos)
+            val = read_dataset_info(val_path, cfg.data.val_num_demos, obs_mode=cfg.task.obs_mode)
             if (train.env_id, train.control_mode) != (cfg.task.env_id, cfg.task.control_mode):
                 raise ValueError("training metadata does not match task config")
             if (val.env_id, val.control_mode) != (cfg.task.env_id, cfg.task.control_mode):
@@ -81,8 +81,9 @@ def main(argv: list[str] | None = None) -> None:
             stats = compute_normalization(train)
             print(
                 f"PASS {cfg.task.env_id}: train {len(train.episodes)} demos/{train.num_transitions} steps; "
-                f"val {len(val.episodes)}; RGB {train.image_shape} {list(train.cameras)}; "
-                f"proprio {train.proprio_dim}; action {train.action_dim} ({train.control_mode}); "
+                f"val {len(val.episodes)}; obs_mode {train.obs_mode}; "
+                f"images {train.image_shape} {list(train.cameras)}; "
+                f"lowdim {train.proprio_dim}; action {train.action_dim} ({train.control_mode}); "
                 f"action range [{stats.action_low.min():.3f}, {stats.action_high.max():.3f}]"
             )
         except Exception as error:

@@ -30,7 +30,7 @@ from .config import Config
 from .data import (
     DatasetInfo,
     NormalizationStats,
-    RGBWindowDataset,
+    ObservationWindowDataset,
     compute_normalization,
     read_dataset_info,
 )
@@ -83,6 +83,8 @@ def check_dataset(
         raise ValueError(
             f"{split} dataset control_mode={info.control_mode!r}, expected {cfg.task.control_mode!r}"
         )
+    if info.obs_mode != cfg.task.obs_mode:
+        raise ValueError(f"{split} dataset observation mode differs from task.obs_mode")
     if seed_range is not None:
         finetune_lib.check_seed_range(info, seed_range, split)
         return
@@ -100,7 +102,9 @@ def dataset_record(info: DatasetInfo) -> dict:
         "num_demos": len(info.episodes),
         "num_transitions": info.num_transitions,
         "seeds": info.seeds,
-        "image_shape": list(info.image_shape),
+        "image_shape": list(info.image_shape) if info.image_shape is not None else None,
+        "obs_mode": info.obs_mode,
+        "observation_key": info.observation_key,
         "proprio_dim": info.proprio_dim,
         "action_dim": info.action_dim,
         "cameras": list(info.cameras),
@@ -134,9 +138,9 @@ def validate(
                 batch = move_batch(batch, device)
                 with torch.amp.autocast(device.type, enabled=amp):
                     loss = policy.compute_loss(
-                        batch["rgb"], batch["proprio"], batch["actions"], generator=generator
+                        batch.get("rgb"), batch["proprio"], batch["actions"], generator=generator
                     )
-                count = batch["rgb"].shape[0]
+                count = batch["actions"].shape[0]
                 total_loss += loss.detach().item() * count
                 total_items += count
     policy.train(was_training)
@@ -214,10 +218,12 @@ def run_training(
     if not data_root.is_absolute():
         data_root = ROOT / data_root
     train_info = read_dataset_info(
-        resolve_data_path(data_root, cfg.data.train_path), cfg.data.num_demos
+        resolve_data_path(data_root, cfg.data.train_path), cfg.data.num_demos,
+        obs_mode=cfg.task.obs_mode,
     )
     val_info = read_dataset_info(
-        resolve_data_path(data_root, cfg.data.val_path), cfg.data.val_num_demos
+        resolve_data_path(data_root, cfg.data.val_path), cfg.data.val_num_demos,
+        obs_mode=cfg.task.obs_mode,
     )
     check_dataset(train_info, cfg, "train", finetune.train_seed_range if finetune else None)
     check_dataset(val_info, cfg, "val", finetune.val_seed_range if finetune else None)
@@ -250,10 +256,10 @@ def run_training(
         else compute_normalization(train_info)
     )
     preload_start = time.time()
-    train_dataset = RGBWindowDataset(
+    train_dataset = ObservationWindowDataset(
         train_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
     )
-    val_dataset = RGBWindowDataset(
+    val_dataset = ObservationWindowDataset(
         val_info, cfg.policy.obs_horizon, cfg.policy.pred_horizon, preload=cfg.data.preload
     )
     if cfg.data.preload:
@@ -292,6 +298,7 @@ def run_training(
         proprio_dim=train_info.proprio_dim,
         action_dim=train_info.action_dim,
         stats=stats,
+        obs_mode=cfg.task.obs_mode,
     ).to(device)
     frozen: list[str] = []
     if init_checkpoint is not None and finetune is not None:
@@ -463,7 +470,7 @@ def run_training(
         batch = move_batch(batch, device)
         optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast(device.type, enabled=use_amp):
-            loss = policy.compute_loss(batch["rgb"], batch["proprio"], batch["actions"])
+            loss = policy.compute_loss(batch.get("rgb"), batch["proprio"], batch["actions"])
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(policy.parameters(), cfg.train.grad_clip)

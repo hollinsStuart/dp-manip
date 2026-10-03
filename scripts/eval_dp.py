@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate an RGB checkpoint on fixed validation, test, or training seeds."""
+"""Evaluate an RGB or state checkpoint on fixed held-out or training seeds."""
 
 from __future__ import annotations
 
@@ -95,6 +95,7 @@ def main() -> None:
         checkpoint_step=int(checkpoint["step"]),
         split=args.split,
         env_id=cfg.task.env_id,
+        obs_mode=cfg.task.obs_mode,
         sim_backend=cfg.task.sim_backend,
         num_envs=num_envs,
         inference_seed=cfg.eval.inference_seed,

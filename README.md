@@ -31,13 +31,17 @@ PegInsertionSide、PlugCharger 与 LiftPegUpright 使用 `pd_joint_pos`，与 `m
 
 ## 数据契约
 
+完整 state 的 PegInsertionSide N=100、seed=1 诊断对照已接入统一流程，使用独立的
+`_state_` run 目录。配置、数据检查及单 GPU 训练→验证→测试命令见
+[state 对照说明](docs/peginsertion-state.zh-CN.md)；默认主线仍使用 RGB。
+
 每个 split 使用 `maniskill-demogen/data/dataset/` 下的文件：
 
 ```text
 {train,val}/<Env>/motionplanning/trajectory.state.<control>.physx_cpu.h5
 ```
 
-训练只读取：
+RGB 训练只读取：
 
 ```text
 traj_i/obs_rgb/rgb    uint8   (T+1, 128, 128, 3*C)
