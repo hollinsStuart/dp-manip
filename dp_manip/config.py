@@ -19,6 +19,7 @@ class TaskConfig:
     max_episode_steps: int
     sim_backend: str
     shader_pack: str
+    obs_mode: str = "rgb"
 
 
 @dataclass
@@ -129,6 +130,8 @@ class Config:
     eval: EvalConfig
 
     def validate(self) -> None:
+        if self.task.obs_mode not in ("rgb", "state"):
+            raise ValueError("task.obs_mode must be rgb or state")
         if self.task.sim_backend != "physx_cpu":
             raise ValueError("evaluation must use physx_cpu to match the generated demonstrations")
         if (
@@ -247,10 +250,10 @@ def default_run_name(cfg: Config) -> str:
     avg arm of a pooling comparison reuses the matching baseline run. A control
     mode no task file declares adds a tag the same way (``_eepose``).
     """
-    pool = "" if cfg.vision.pool == "avg" else f"_ss{cfg.vision.num_keypoints}"
+    pool = "" if cfg.task.obs_mode == "state" or cfg.vision.pool == "avg" else f"_ss{cfg.vision.num_keypoints}"
     control = _CONTROL_MODE_TAGS.get(cfg.task.control_mode, "")
     return (
-        f"{cfg.task.name}_rgb_{cfg.policy.backbone}{pool}{control}"
+        f"{cfg.task.name}_{cfg.task.obs_mode}_{cfg.policy.backbone}{pool}{control}"
         f"_n{cfg.data.num_demos}_s{cfg.train.seed}"
     )
 
@@ -343,6 +346,7 @@ def _adapt_legacy_config(raw: dict[str, Any]) -> dict[str, Any]:
 # a field existed actually trained with. They are applied only by
 # ``from_recorded``; fresh configs must get every value from baseline.toml.
 _HISTORICAL_VALUES: dict[tuple[str, str], Any] = {
+    ("task", "obs_mode"): "rgb",
     # Before Phase 7 the UNet was the only noise predictor.
     ("policy", "backbone"): "unet",
     # Before Phases 9-11 the backbone structure fields did not exist; they only

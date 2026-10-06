@@ -1,5 +1,9 @@
 # Layered RGB experiment configs
 
+默认 `task.obs_mode="rgb"`；`experiments/state_n100.toml` 显式选择完整 state，
+固定 N=100 / UNet / seed=1，并复用其余 baseline 设置。该单次诊断对照的集群入口见
+[PegInsertion state 说明](../docs/peginsertion-state.zh-CN.md)。
+
 正式入口按以下顺序解析，并将完整结果保存进 checkpoint：
 
 ```text
