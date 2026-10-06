@@ -28,6 +28,10 @@ class EpisodeInfo:
     episode_id: int
     seed: int
     length: int
+    # First timestep that starts a training window. Takeover corrections keep
+    # their real pre-takeover frame as observation history but are trained only
+    # from the takeover onwards (docs/failure-expert-takeover-probe.zh-CN.md).
+    start: int = 0
 
 
 @dataclass(frozen=True)
@@ -204,8 +208,11 @@ def read_dataset_info(
                 raise ValueError(f"{path}/{group_name}: observation or action dimensions changed between episodes")
             if "success" in group and not bool(group["success"][-1]):
                 raise ValueError(f"{path}/{group_name}: exported episode is not successful")
+            start = int(entry.get("train_start", 0))
+            if not 0 <= start < len(actions):
+                raise ValueError(f"{path}/{group_name}: train_start {start} outside [0, {len(actions)})")
             episodes.append(
-                EpisodeInfo(group_name, episode_id, _episode_seed(entry, sidecar), len(actions))
+                EpisodeInfo(group_name, episode_id, _episode_seed(entry, sidecar), len(actions), start)
             )
 
     if not episodes or proprio_dim is None or action_dim is None:
@@ -298,7 +305,7 @@ class ObservationWindowDataset(Dataset):
         self.index = [
             (episode_index, timestep)
             for episode_index, episode in enumerate(info.episodes)
-            for timestep in range(episode.length)
+            for timestep in range(episode.start, episode.length)
         ]
         self._file: h5py.File | None = None
         self._episodes: list[dict[str, np.ndarray]] | None = None

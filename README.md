@@ -1,5 +1,8 @@
 # dp-manip：集群 RGB Diffusion Policy
 
+实验进展、已有实测结果、Insertion 负结果分析及汇报 PPT 素材见
+[实验进展与结果汇总](docs/experiment-progress.zh-CN.md)。
+
 本目录是八个 ManiSkill 任务的 **RGB-based Diffusion Policy** 训练与评估工程。数据由
 `maniskill-demogen` 生成；训练/评估面向 Linux GPU 集群。当前 QOS 每用户只允许 **1 个已提交
 作业**，单作业最多 2 张 GPU，因此生产入口是**一个双 GPU 作业内的动态队列**（两个 worker

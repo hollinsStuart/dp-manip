@@ -253,7 +253,8 @@ def run_training(
         check_horizon(cfg, train_info, val_info)
     if init_checkpoint is not None and finetune_record is not None:
         for split, info in (("train", train_info), ("val", val_info)):
-            finetune_lib.check_rollout_source(info, finetune_record["init_checkpoint_sha256"], split)
+            if finetune.require_rollout_source:
+                finetune_lib.check_rollout_source(info, finetune_record["init_checkpoint_sha256"], split)
             finetune_lib.check_schema(info, init_checkpoint["train_data"], split)
     if (
         train_info.image_shape,
