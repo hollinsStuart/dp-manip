@@ -1,6 +1,6 @@
 # 全组结果汇总（预处理稿）
 
-更新：2026-10-05。来源：`results/task1.md`、`task2_data.md`、`task2_backbone.md`、`task3.md`、`task6.md`、`task6_backbone`（组员报告），
+更新：2026-10-07（StackCube N=400 取自 7606C `report/report_stackcube_scaling.md` v2）。来源：`results/task1.md`、`task2_data.md`、`task2_backbone.md`、`task3.md`、`task6.md`、`task6_backbone`（组员报告），
 Task 5 取自本地 [experiment-progress](experiment-progress.zh-CN.md) §6、§9、§10、§12–§15 和 `results/takeover-correction/decision.json`。
 共同口径：RGB Diffusion Policy，100k optimizer steps，`final.pt`，测试种子 10000–10099（100 回合），
 主指标 `success_once`，表中为 seed 间均值 ± SD。
@@ -10,7 +10,7 @@ Task 5 取自本地 [experiment-progress](experiment-progress.zh-CN.md) §6、§
 | 编号 | 原计划任务 | 实际任务 | 控制 / 动作维 | 评估步数 | 数据量（轨道 A） | 主干（轨道 B） | 拓展 |
 | --- | --- | --- | --- | ---: | --- | --- | --- |
 | Task 1 | PickCube | PickCube | ee_delta_pos / 4 | 100 | ✅ 25–400 | ✅ | — |
-| Task 2 | StackCube | StackCube | ee_delta_pos / 4 | 200 | ✅ 25–200（400 未跑） | ✅ | — |
+| Task 2 | StackCube | StackCube | ee_delta_pos / 4 | 200 | ✅ 25–400 | ✅ | — |
 | Task 3 | PushCube | PushCube（推断，报告未写任务名） | ee_delta_pos / 4 | 100 | ✅ 25–200（400 按规则不触发） | ✅ | — |
 | Task 4 | PullCube | — | — | — | ❌ 无报告 | ❌ | — |
 | Task 5 | PegInsertionSide | PegInsertionSide → **PlaceSphere** | joint_pos / 8 → ee_delta_pos / 4 | 300 → 200 | Peg ≈0（负结果）；PlaceSphere ✅ 25–400 | Peg ≈0；PlaceSphere 未做 | ✅ failure-aware + 专家接管纠正（PlaceSphere） |
@@ -21,7 +21,7 @@ Task 5 取自本地 [experiment-progress](experiment-progress.zh-CN.md) §6、§
 | 任务 | N=25 | N=50 | N=100 | N=200 | N=400 | 100→200 是否显著 |
 | --- | --- | --- | --- | --- | --- | --- |
 | PickCube | 0.007 ± 0.012 | 0.007 ± 0.006 | 0.192 ± 0.018 | 0.452 ± 0.031 | 0.534 ± 0.021 | 是，+0.260 [+0.198, +0.322] |
-| StackCube | 0.017 ± 0.012 | 0.123 ± 0.025 | 0.410 ± 0.029 | 0.660 ± 0.031 | 未跑 | 是，+0.250 [+0.182, +0.318] |
+| StackCube | 0.017 ± 0.012 | 0.123 ± 0.025 | 0.410 ± 0.029 | 0.660 ± 0.031 | 0.832 ± 0.019 | 是，+0.250 [+0.182, +0.318] |
 | PushCube | 0.45 | 0.82 | 0.95 | 0.96 | 不触发 | 否，+0.012 [−0.014, +0.038] |
 | PlaceSphere | 0.047 ± 0.029 | 0.253 ± 0.041 | 0.360 ± 0.036 | 0.766 ± 0.056 | 0.962 ± 0.008 | 未计算（点估计 +0.406） |
 | LiftPegUpright | 0.070 ± 0.010 | 0.363 ± 0.031 | 0.674 ± 0.021 | 0.748 ± 0.028 | 0.792 ± 0.008 | 未报告 |
@@ -30,7 +30,7 @@ Task 5 取自本地 [experiment-progress](experiment-progress.zh-CN.md) §6、§
 N=25/50 为 3 个训练 seed，N≥100 为 5 个。PegInsertionSide 这一行用的是 val 50 回合，与其他行口径不同。
 
 形状上分三类：PushCube 在 100 条饱和；PickCube、LiftPegUpright、PlaceSphere 到 400 条仍在涨但收益递减（PlaceSphere 400 条时 0.962，接近饱和）；
-StackCube 到 200 条仍然陡升，按预注册规则（100→200 区间不含 0 就加 400）本应补 N=400，目前是唯一没补的。
+StackCube 按预注册规则（100→200 区间不含 0 就加 400）补跑了 N=400：0.832，200→400 为 +0.172 [+0.108, +0.236]，是这条曲线上增益第一次变小的一次翻倍，但仍显著，尚未饱和。
 
 ## 3. 主干对比（N=100，`success_once`）
 
@@ -79,7 +79,7 @@ C−B **+13.8pp** [+9.3, +18.3]，C−D **+14.3pp** [+9.5, +19.0]，D−B −0.5
    - **评估步数不统一**：数据量评估用 200 步，主干评估用 400 步，checkpoint 里记录的是 50 步。训练示范长度 153–702 步（中位 169），200 步会截掉一部分长回合，400 步也盖不住最长的 702 步。建议全部统一重评为 400 步（只需评估，不用重训，每个 run 约 3–4 GPU-min）。
    - 数据量部分缺每个 seed 的数值、各 N 的 `success_at_end`（只有 N=400 的 0.784）、相邻档 bootstrap、val loss 数值、算力和 Gate B。
    - 主干部分需要确认测试种子是不是 10000–10099（报告只写了「checkpoint 配置中的 test seed 序列」），以及运行时代码是 dirty 状态时具体改了什么。
-4. **Task 2 StackCube**：主干报告缺参数量、训练和推理耗时，统计检验用的是 z 检验，没有用两层 bootstrap。数据量报告里还有若干【待补】，比如示范来源和 batch/lr（这两项其实全组统一，可以直接引用 Task 1 / Task 3 的设置）。N=400 已满足触发条件但没跑。
+4. **Task 2 StackCube**：主干报告缺参数量、训练和推理耗时，统计检验用的是 z 检验，没有用两层 bootstrap。数据量报告里还有若干【待补】，比如示范来源和 batch/lr（这两项其实全组统一，可以直接引用 Task 1 / Task 3 的设置）。N=400 已在报告 v2 中补齐（0.832 ± 0.019，5 个 seed）。
 5. **Task 5 PlaceSphere 数据量**：缺 `success_at_end`、相邻档 bootstrap 和 val loss；没有做主干对比。N=400 已补（0.962）。
 
 **口径不一致（汇总前要统一）**
@@ -133,12 +133,12 @@ PushCube 0.95 > PickCube 0.906 > LiftPegUpright 0.714 > StackCube 0.418 > PegIns
 | PushCube | ≈27 | 已饱和 |
 | LiftPegUpright | ≈68 | 收益递减 |
 | PlaceSphere | ≈127 | 仍在陡升；400 条时 0.962，接近饱和 |
-| StackCube | ≈128 | 仍在陡升 |
+| StackCube | ≈128 | 到 400 仍在涨（0.832） |
 | PickCube（UNet） | ≈300 | 收益递减（受 UNet 过拟合影响） |
 | PegInsertionSide | 未达到 | ≈0 |
 
 在 log N 坐标下，几条曲线大致都是 S 形，只是左右平移。「100 条够用」这个说法只对简单任务成立；
-StackCube 和 PlaceSphere 在 200 条时还处于最陡的一段。PlaceSphere 已补 N=400，确认是再涨一段后接近饱和；StackCube 的 N=400 仍缺。
+StackCube 和 PlaceSphere 在 200 条时还处于最陡的一段。PlaceSphere 已补 N=400，确认是再涨一段后接近饱和；StackCube 补跑 N=400 后为 0.832，增益变小但仍显著，尚未饱和。
 
 ### 7.3 主干：加入 LiftPegUpright 后，MLP 的趋势更清楚，Transformer 的趋势变弱
 

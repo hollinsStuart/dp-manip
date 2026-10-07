@@ -79,7 +79,8 @@ DATA_SIZE = {
     },
     "LiftPegUpright": {25: (0.070, 0.010), 50: (0.363, 0.031), 100: (0.674, 0.021),
                        200: (0.748, 0.028), 400: (0.792, 0.008)},
-    "StackCube": {25: (0.017, 0.012), 50: (0.123, 0.025), 100: (0.410, 0.029), 200: (0.660, 0.031)},
+    "StackCube": {25: (0.017, 0.012), 50: (0.123, 0.025), 100: (0.410, 0.029), 200: (0.660, 0.031),
+                  400: (0.832, 0.019)},
     "PlaceSphere": {25: (0.047, 0.029), 50: (0.253, 0.041), 100: (0.360, 0.036), 200: (0.766, 0.056),
                     400: (0.962, 0.008)},
     "PickCube": {25: (0.007, 0.012), 50: (0.007, 0.006), 100: (0.192, 0.018),
@@ -164,7 +165,7 @@ def fig_datasize(out: Path):
 
     # Direct labels at line ends, nudged apart where they would collide.
     ends = {t: (max(DATA_SIZE[t]), DATA_SIZE[t][max(DATA_SIZE[t])][0]) for t in DATA_SIZE}
-    nudge = {"PushCube": 0.025, "StackCube": -0.03, "PlaceSphere": 0.0, "LiftPegUpright": -0.01, "PickCube": -0.01}
+    nudge = {"PushCube": 0.025, "StackCube": 0.03, "PlaceSphere": 0.0, "LiftPegUpright": -0.03, "PickCube": -0.01}
     for t, (n, p) in ends.items():
         ax.annotate(t, (n, p + nudge[t]), xytext=(7, 0), textcoords="offset points",
                     color=INK, fontsize=9, va="center")
